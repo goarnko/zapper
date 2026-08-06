@@ -47,9 +47,13 @@ def convert(data: bytes, path: Path, size: int = SIZE) -> Path:
     """Decode any supported image and write a downscaled PNG."""
     from io import BytesIO
 
-    with Image.open(BytesIO(data)) as image:
-        image = image.convert("RGBA")
-        image.thumbnail((size, size), Image.LANCZOS)
+    with Image.open(BytesIO(data)) as opened:
+        # convert() returns a new Image rather than an ImageFile, so it needs
+        # its own name; rebinding `opened` confuses the type of the handle.
+        image = opened.convert("RGBA")
+        # Image.LANCZOS still works at runtime but is a legacy alias; the
+        # enum is where Pillow declares it.
+        image.thumbnail((size, size), Image.Resampling.LANCZOS)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(".png.part")
         image.save(tmp, "PNG")
