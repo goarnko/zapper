@@ -79,7 +79,12 @@ The XMLTV feed is well-formed — all timestamps 14-digit and `+0000`, no missin
 
 The coverage gap is the thing to design around: **only 126 of 471 channels have guide data** (~27%). The playlist mostly lacks `tvg-id`, which is the only join key. So "no guide" is the *majority* case and is rendered as a quiet line in the pane, never an error. Every `Guide` lookup returns `None`/empty rather than raising, and a missing or corrupt cache yields an empty `Guide`.
 
-61 XMLTV channel ids have programmes but no playlist channel — Atresmedia and Mediaset (`Cuatro.TV`, `Telecinco.TV`, `Bemad.TV`, …) among them. They have guide data but no stream, because those broadcasters gate live playback behind their own platforms. Adding them to the list would need a different playback mechanism, not a playlist fix.
+61 XMLTV channel ids have programmes but no playlist channel — Atresmedia and Mediaset (`Cuatro.TV`, `Telecinco.TV`, `Bemad.TV`, …) among them. They have guide data but no stream, because those broadcasters gate live playback behind their own platforms (Atresplayer, Mitele). This is a known gap, scheduled under **Milestone 5**, and it is not a parser bug — don't try to fix it in `playlist.py`.
+
+Two halves to it, worth keeping apart:
+
+- Milestone 5 supplies the *plumbing* — provider abstraction, custom M3U, merging sources into one list. If a third-party list carrying working URLs exists, that machinery is enough.
+- If no such list exists, the channels need a **different playback mechanism**: launching the broadcaster's web player instead of VLC. That is a player backend, closer to Milestone 6, which currently names only VLC and MPV.
 
 ## Environment gotchas
 

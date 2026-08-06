@@ -138,6 +138,21 @@ Supported providers
 - Custom M3U
 - Pluto TV (where legally available)
 
+## Note — Atresmedia and Mediaset
+
+Antena 3, laSexta, Neox, Nova, Mega, Atreseries, Telecinco, Cuatro, FDF,
+Energy, Divinity, Boing and Be Mad are missing from the channel list.
+
+They are absent from the TDTChannels playlist because both broadcasters
+gate live playback behind their own platforms (Atresplayer, Mitele). The
+XMLTV guide *does* carry them, so they already appear as programme data
+with no stream to play.
+
+This milestone supplies the plumbing: pointing ZapTV at a list that
+carries working URLs for them is enough. If no such list exists, they
+instead need a player that can open the broadcaster's web player — see
+Milestone 6.
+
 Deliverable
 
 ```
@@ -158,6 +173,10 @@ Player independence.
 - MPV backend
 - Player selection
 - Player detection
+
+A browser backend belongs here too, if the Atresmedia and Mediaset
+channels noted under Milestone 5 turn out to need one: opening the
+broadcaster's web player is a player choice, not a playlist source.
 
 Deliverable
 
