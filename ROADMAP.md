@@ -216,6 +216,23 @@ Easy installation.
 - Icons
 - Automatic updates (application)
 
+Status: done except application self-update.
+
+packaging/ has three routes, all verified to build and run:
+build-deb.sh, install-user.sh (rootless, from a checkout) and
+build-appimage.sh. The desktop entry and eight hicolor icon sizes are
+installed by the first two.
+
+The AppImage is thin: it carries ZapTV but uses the host's Python,
+Tkinter and Pillow. Bundling an interpreter needs a python-appimage base
+and was not attempted.
+
+Application self-update is deferred. It needs a release channel to check
+against -- the repository has no releases yet -- and the mechanism
+differs per format: a .deb updates through apt, an AppImage would need
+AppImageUpdate or its own downloader. Worth revisiting once there is
+something to update to.
+
 Deliverable
 
 ```

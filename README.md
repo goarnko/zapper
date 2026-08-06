@@ -6,22 +6,42 @@ Channels come from the [TDTChannels](https://www.tdtchannels.com/) playlist and 
 
 ## Requirements
 
-- Python 3.13+
+- Python 3.10+
 - Tkinter — `sudo apt install python3-tk`
 - VLC — `sudo apt install vlc` (mpv also works: `sudo apt install mpv`)
 - Pillow — installed with the package; needed to decode channel logos
 
-## Usage
+## Install
+
+**Debian / Ubuntu package** — builds a `.deb` and installs the launcher, desktop entry and icons:
 
 ```bash
-pip install -e .
-zaptv
+packaging/build-deb.sh
+sudo apt install ./dist/zaptv_0.1.0_all.deb
 ```
 
-Or run from a checkout without installing:
+**From a checkout, for your user only** — no root; the launcher points back at the
+checkout, so `git pull` updates the installed app:
 
 ```bash
-PYTHONPATH=src python3 -m zaptv           # open the channel list
+packaging/install-user.sh      # and --uninstall to undo
+```
+
+**AppImage:**
+
+```bash
+packaging/build-appimage.sh
+./dist/ZapTV-0.1.0-x86_64.AppImage
+```
+
+Note the AppImage is *thin*: it carries ZapTV but uses the host's Python, Tkinter and
+Pillow rather than bundling an interpreter. It tells you which one is missing if any is.
+
+**Or just run it in place:**
+
+```bash
+pip install -e . && zaptv
+PYTHONPATH=src python3 -m zaptv           # without installing
 PYTHONPATH=src python3 -m zaptv --list    # print channels as TSV instead
 ```
 

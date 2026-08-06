@@ -18,7 +18,11 @@ The application should avoid becoming another media center. Every technology cho
 
 # Programming Language
 
-## Python 3.13+
+## Python 3.10+
+
+Originally specified as 3.13+, relaxed to 3.10 because nothing in the code
+needs a newer interpreter and Ubuntu 24.04 LTS ships 3.12. Requiring 3.13
+only prevented installation on the target platform.
 
 Python is the preferred language because it provides:
 

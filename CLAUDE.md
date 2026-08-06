@@ -4,13 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Milestones 1–6 are done: download → parse → browse → play, settings, search, favorites, recently-watched, a Now/Next guide from XMLTV, channel logos, light/dark themes, a settings window, an app icon, and multiple playlist providers with merging.
+Milestones 1–7 are done: download → parse → browse → play, settings, search, favorites, recently-watched, a Now/Next guide from XMLTV, channel logos, light/dark themes, a settings window, an app icon, and multiple playlist providers with merging.
 
 A `BrowserPlayer` backend and a "Web channels" playlist are how the Atresmedia and Mediaset channels appear.
 
 Much of Milestone 6 was already delivered incrementally — the VLC and mpv backends, selection in the settings window, and `is_available` detection all predate it. What it added was **resolution** (`player.resolve`), a per-channel *Play with…* menu, and `--players`.
 
-**Not** done in Milestone 5: Pluto TV is not bundled as a named provider. Users can add its M3U by URL, but there is no built-in entry for it.
+**Not** done: Pluto TV is not bundled as a named provider (Milestone 5) — addable by URL, but no built-in entry. Application self-update (Milestone 7) is deferred: it needs a release channel, and the repo has no GitHub releases yet.
 
 Note the git repo is named `zapper` but the project is **ZapTV** (`zaptv`) — the rename happened after the repo was created.
 
@@ -32,6 +32,10 @@ PYTHONPATH=src python3 -m zaptv --now              # Now/Next per channel
 PYTHONPATH=src python3 -m zaptv --providers        # configured playlist sources
 PYTHONPATH=src python3 -m zaptv --players          # which player backends are installed
 PYTHONPATH=src python3 -m zaptv --player mpv       # override the configured player
+
+packaging/build-deb.sh                             # -> dist/zaptv_<v>_all.deb
+packaging/build-appimage.sh                        # -> dist/ZapTV-<v>-x86_64.AppImage
+packaging/install-user.sh [--uninstall]            # rootless install from a checkout
 python3 -m pytest tests -q                         # tests
 python3 -m ruff check src tests                    # lint
 python3 -m mypy                                    # type check (config in pyproject)
@@ -96,6 +100,16 @@ Two things to know before changing it:
 75 of 471 channels carry more than one mirror (up to 9), and only `streams[0]` is ever played. Automatic failover was measured against the live playlist before building it: 13 of 14 sampled first mirrors returned 200, and the one failure (ETB Deportes) returned 403 on *every* mirror — geo-blocking, which failover cannot fix. A pre-flight probe would have added 0.1–1.4s to every play for almost no benefit. Don't add it without new evidence; a manual "next mirror" action would be the better shape if this comes up again.
 
 Guide coverage is split: the seven Mediaset channels have XMLTV ids (`Telecinco.TV`, `Cuatro.TV`, `FDF.TV`, `Energy.TV`, `Divinity.TV`, `Boing.TV`, `Bemad.TV`) and show Now/Next; the six Atresmedia ones are absent from the TDTChannels EPG entirely and never will until that feed adds them.
+
+## Packaging
+
+`packaging/` holds three routes, all verified to build and run here:
+
+- **`build-deb.sh`** — plain `dpkg-deb` over a staged tree, not `dpkg-buildpackage`. The package is pure Python with nothing to compile, so a control file says everything debhelper would. Payload lands in `/usr/lib/python3/dist-packages/zaptv`, with a launcher at `/usr/bin/zaptv`, the desktop entry, and eight hicolor icon sizes. `postrm` needs its own script — it receives `remove`/`purge`, never `configure`, so a copy of `postinst` silently does nothing on uninstall.
+- **`install-user.sh`** — rootless. The launcher *points back at the checkout* rather than copying it, so a `git pull` updates the installed app. The desktop entry's `Exec` is rewritten to an absolute path, because a desktop session does not inherit a shell `PATH`.
+- **`build-appimage.sh`** — fetches `appimagetool` and **extracts** it rather than running it, since AppImages need FUSE that many systems and every container lack. The result is a *thin* AppImage: ZapTV travels with it, but Python, Tkinter and Pillow come from the host, and `AppRun` names whichever is missing. Bundling a real interpreter would mean building on a `python-appimage` base — a much larger job, deliberately not attempted.
+
+`.desktop` uses `StartupWMClass=Tk`, matching the WM_CLASS Tk actually sets (`("tk" "Tk")`). `build/` and `dist/` are gitignored.
 
 ## Paths
 

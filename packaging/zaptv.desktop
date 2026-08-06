@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=ZapTV
+GenericName=TV Launcher
+Comment=Browse and watch live TV channels
+Comment[es]=Explora y mira canales de televisión en directo
+Exec=zaptv
+Icon=zaptv
+Terminal=false
+Categories=AudioVideo;Video;Player;TV;
+Keywords=tv;television;iptv;tdt;live;streaming;
+StartupNotify=true
+StartupWMClass=Tk
