@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Milestone 1 is scaffolded: download playlist → parse M3U → list channels → launch VLC, plus settings. Search, favorites, EPG, and logos are not implemented.
+Milestones 1–2 are done: download → parse → browse → play, plus settings, search with instant filtering, favorites, and recently-watched. EPG and channel logos (Milestone 3) are not implemented.
 
 Note the git repo is named `zapper` but the project is **ZapTV** (`zaptv`) — the rename happened after the repo was created.
 
@@ -19,14 +19,15 @@ Three specs, and they do not fully agree — `STACK.md` and `ROADMAP.md` are new
 ## Commands
 
 ```bash
-PYTHONPATH=src python3 -m zaptv           # run the GUI
-PYTHONPATH=src python3 -m zaptv --list    # channels as group/name/stream TSV (no GUI needed)
-python3 -m pytest tests -q                # tests
-python3 -m ruff check src tests           # lint
-python3 -m mypy                           # type check (config in pyproject)
+PYTHONPATH=src python3 -m zaptv                    # run the GUI
+PYTHONPATH=src python3 -m zaptv --list             # channels as TSV (no GUI needed)
+PYTHONPATH=src python3 -m zaptv --search malaga    # same, filtered
+python3 -m pytest tests -q                         # tests
+python3 -m ruff check src tests                    # lint
+python3 -m mypy                                    # type check (config in pyproject)
 ```
 
-`--list` exercises the whole download + parse path without a display or Tkinter — use it to verify parser changes.
+`--list`/`--search` exercise the download, parse and filter paths without a display or Tkinter — use them to verify changes there. The leading `*` column marks favorites.
 
 Installed (`pip install -e .`) the entry point is `zaptv`.
 
@@ -39,12 +40,25 @@ These come from `SPEC.md`/`STACK.md`; don't relitigate them without the user ask
 - **Channels are never hardcoded or shipped.** The playlist is always downloaded from a provider at runtime.
 - **Not a media center.** No library, movies, series, music, PVR, torrents, streaming server, accounts, or cloud sync. `ROADMAP.md` lists these as explicitly out of scope.
 
+## UI conventions
+
+`ui.py` holds only widget wiring; matching and ordering live in `search.py` so they can be tested without a display (Tkinter is unavailable here — see below).
+
+- The list is rebuilt from scratch on every keystroke, favorite toggle, and play. `_refresh` therefore saves and restores the selection; without that, favoriting throws the user back to the top of ~471 channels.
+- A favorited channel appears **twice** — once under `★ FAVORITES`, once in its group. `_index_of` deliberately returns the *last* match so selection lands on the group copy, keeping neighbours in view.
+- Something is always selected, so Enter plays straight after typing a search without an arrow key in between.
+- Search is accent-insensitive in both directions (`malaga` ↔ `Málaga`) because Spanish channel names are full of accents users don't type. Tokens are ANDed.
+
+Shortcuts follow `SPEC.md`: Enter plays, `Ctrl+F` focuses search, `F` favorites, `Ctrl+R` forces a playlist update, `Esc` clears the search. **`Esc` no longer quits** — `Ctrl+Q` does.
+
 ## Paths
 
 XDG-split, and both honor their env vars:
 
 - Cache (disposable): `~/.local/share/zaptv/` — `playlist.m3u`, later `epg.xml.gz`, `logos/`. Refreshed when >24h old.
-- Config (user intent): `~/.config/zaptv/` — `settings.json`, later `favorites.json`, `recent.json`.
+- Config (user intent): `~/.config/zaptv/` — `settings.json`, `favorites.json`, `recent.json`.
+
+Favorites and recents are keyed by **channel name**, not `(name, group)`, matching the flat JSON list in `SPEC.md`. That keeps a favorite alive when a channel changes group in an updated playlist; the cost is that two channels sharing a name across groups are favorited together. All three JSON files fall back to defaults rather than raising when corrupt — a bad config file must never stop playback.
 
 ## What the real playlist looks like
 

@@ -2,8 +2,9 @@
 
 import sys
 
-from . import playlist, updater
+from . import playlist, search, updater
 from .settings import Settings
+from .storage import Favorites, Recent
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,9 +33,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"No channels found in {path}", file=sys.stderr)
         return 1
 
-    if "--list" in argv:
-        for channel in sorted(channels, key=lambda c: (c.group, c.name.casefold())):
-            print(f"{channel.group}\t{channel.name}\t{channel.stream}")
+    if "--search" in argv:
+        index = argv.index("--search")
+        query = argv[index + 1] if index + 1 < len(argv) else ""
+        channels = search.filter_channels(channels, query)
+
+    if "--list" in argv or "--search" in argv:
+        favorites = Favorites.load()
+        for channel in sorted(channels, key=lambda c: (search.normalize(c.group), search.sort_key(c))):
+            marker = "*" if channel.name in favorites else " "
+            print(f"{marker}\t{channel.group}\t{channel.name}\t{channel.stream}")
         return 0
 
     try:
@@ -47,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    ui.run(channels, config)
+    ui.run(channels, config, Favorites.load(), Recent.load())
     return 0
 
 
