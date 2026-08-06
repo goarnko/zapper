@@ -16,7 +16,10 @@ def test_unknown_player_falls_back_to_default():
     assert isinstance(player.get_player("nonexistent"), player.VLCPlayer)
 
 
-def test_args_put_the_stream_last():
+def test_args_put_the_stream_last(monkeypatch):
+    # Patched rather than relying on VLC being installed: it is not on a CI
+    # runner, and this test is about argument order, not availability.
+    monkeypatch.setattr(shutil, "which", lambda cmd: f"/usr/bin/{cmd}")
     args = player.VLCPlayer().args("https://example.invalid/s.m3u8")
     assert args[-1] == "https://example.invalid/s.m3u8"
     assert args[0].endswith("vlc")
@@ -44,7 +47,8 @@ def test_browser_player_is_registered_but_not_user_selectable():
     assert set(player.SELECTABLE) <= set(player.PLAYERS)
 
 
-def test_browser_player_passes_the_page_url_through():
+def test_browser_player_passes_the_page_url_through(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda cmd: f"/usr/bin/{cmd}")
     args = player.BrowserPlayer().args("https://www.atresplayer.com/directos/antena3/")
     assert args[-1] == "https://www.atresplayer.com/directos/antena3/"
     assert args[0].endswith("xdg-open")

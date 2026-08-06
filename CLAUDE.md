@@ -112,6 +112,8 @@ All three pass; keep them passing.
   - `logos.LogoSource` is a `Protocol` covering just `path_for`/`drain`. `ChannelBrowser` takes that rather than `LogoStore`, so test doubles satisfy it structurally instead of needing a cast.
 - **pytest** — 143 unit tests, plus 5 integration tests that are **off unless `ZAPTV_INTEGRATION=1`**. Those hit the live feeds and assert loose bounds (≥250 channels, ≥1000 programmes, playlist and guide still share tvg-ids, broadcaster pages still 200). They exist to catch the feed changing shape, which no unit test can. CI runs them weekly and on demand, never on a PR.
 
+**Tests must not depend on what is installed.** Anything touching a player patches `shutil.which` rather than assuming VLC or `xdg-open` exists — CI runners have neither. To check, run the suite with `shutil.which` stubbed to return `None` for `vlc`, `mpv` and `xdg-open`.
+
 Display-dependent tests skip rather than fail when there is no `DISPLAY`, so headless runs stay green; CI runs the suite twice, once under `xvfb-run` and once without, so the GUI tests cannot silently stop running.
 
 ## Packaging
