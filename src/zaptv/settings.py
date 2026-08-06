@@ -22,6 +22,8 @@ SETTINGS_PATH = config_dir() / "settings.json"
 class Settings:
     player: str = "vlc"
     auto_update: bool = True
+    theme: str = "light"
+    show_logos: bool = True
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Settings":

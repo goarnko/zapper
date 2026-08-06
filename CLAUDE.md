@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Milestones 1–3 are done: download → parse → browse → play, settings, search with instant filtering, favorites, recently-watched, and a Now/Next guide from XMLTV. Channel logos and the rest of Milestone 4 (polish) are not implemented.
+Milestones 1–4 are done: download → parse → browse → play, settings, search with instant filtering, favorites, recently-watched, a Now/Next guide from XMLTV, channel logos, light/dark themes, a settings window and an app icon. Milestone 5 (multiple providers) is next.
 
 Note the git repo is named `zapper` but the project is **ZapTV** (`zaptv`) — the rename happened after the repo was created.
 
@@ -36,28 +36,34 @@ Installed (`pip install -e .`) the entry point is `zaptv`.
 
 These come from `SPEC.md`/`STACK.md`; don't relitigate them without the user asking.
 
-- **Zero runtime dependencies.** Only Python and an external player. M3U parsing is hand-rolled, EPG will use stdlib `gzip` + `xml.etree.ElementTree`, networking is `urllib.request` (not requests/curl/wget), storage is plain JSON. Dev tooling (pytest/ruff/mypy) is the only exception.
+- **Near-zero runtime dependencies.** M3U parsing is hand-rolled, EPG uses stdlib `gzip` + `xml.etree.ElementTree`, networking is `urllib.request` (not requests/curl/wget), storage is plain JSON. **Pillow is the one deliberate exception**, agreed for Milestone 4: nearly every channel logo is JPEG and Tk's `PhotoImage` reads only PNG/GIF, so there is no stdlib path to logos. Don't add a second dependency without asking. Dev tooling (pytest/ruff/mypy) doesn't count.
 - **No video playback in-process, ever.** Players live behind the `Player` ABC in `player.py`; a new backend is a new subclass plus a `PLAYERS` entry. `VLCPlayer` is the default, `MPVPlayer` exists for Milestone 6.
 - **Channels are never hardcoded or shipped.** The playlist is always downloaded from a provider at runtime.
 - **Not a media center.** No library, movies, series, music, PVR, torrents, streaming server, accounts, or cloud sync. `ROADMAP.md` lists these as explicitly out of scope.
 
 ## UI conventions
 
-`ui.py` holds only widget wiring; matching and ordering live in `search.py` so they can be tested without a display (Tkinter is unavailable here — see below).
+`ui.py` holds only widget wiring; matching and ordering live in `search.py` so they can be tested without a display.
+
+The list is a **`ttk.Treeview`**, not a `Listbox` — only Treeview supports a per-row image, which channel logos need. Section headers are Treeview rows *absent from `_rows`*, which is exactly what makes them unselectable: `selected()` returns `None` for them.
 
 - The list is rebuilt from scratch on every keystroke, favorite toggle, and play. `_refresh` therefore saves and restores the selection; without that, favoriting throws the user back to the top of ~471 channels.
-- **`see()` on an unmapped listbox scrolls its target to the very top**, hiding the section header above it — the list then looks unlabelled at startup. `_restore_selection` uses `yview_moveto(0)` when nothing carried over (startup, or a search that dropped the selection) and only calls `see()` when genuinely restoring a selection, by which point the widget is mapped. `after_idle` does *not* fix this: idle callbacks run before the window is mapped. `tests/test_ui_scroll.py` guards it.
-- A favorited channel appears **twice** — once under `★ FAVORITES`, once in its group. `_index_of` deliberately returns the *last* match so selection lands on the group copy, keeping neighbours in view.
+- **`see()` on an unmapped widget scrolls its target to the very top**, hiding the section header above it — the list then looks unlabelled at startup. `_restore_selection` uses `yview_moveto(0)` when nothing carried over (startup, or a search that dropped the selection) and only calls `see()` when genuinely restoring a selection, by which point the widget is mapped. `after_idle` does *not* fix this: idle callbacks run before the window is mapped.
+- A favorited channel appears **twice** — once under `★ FAVORITES`, once in its group. `_restore_selection` scans `_row_order` in reverse so selection lands on the group copy, keeping neighbours in view.
 - Something is always selected, so Enter plays straight after typing a search without an arrow key in between.
 - Search is accent-insensitive in both directions (`malaga` ↔ `Málaga`) because Spanish channel names are full of accents users don't type. Tokens are ANDed.
+- **Logo URLs are shared between channels** — one Facebook logo covers 16 regional channels, and 471 channels resolve to 360 distinct logos. `_tick_logos` therefore tests whether *the row* already has an image, never whether the URL is in `_images`; keying off the image cache fills only the first row of each shared group and silently leaves the rest blank.
+- Tk images must be built on the main thread and kept referenced (`_images`), or they are garbage collected straight off the rows. `LogoStore` workers only write files; the UI collects them via `drain()`.
 
-Shortcuts follow `SPEC.md`: Enter plays, `Ctrl+F` focuses search, `F` favorites, `Ctrl+R` forces a playlist update, `Esc` clears the search. **`Esc` no longer quits** — `Ctrl+Q` does.
+Theming lives in `theme.py`. ttk ignores widget-level colour options, so the Treeview and the settings dialog need configured *styles* (`style_dialog`), and the `clam` theme is used because the default Linux ttk theme ignores Treeview background settings entirely.
+
+Shortcuts follow `SPEC.md`: Enter plays, `Ctrl+F` focuses search, `F` favorites, `Ctrl+R` forces a playlist and guide update, `Esc` clears the search, `Ctrl+,` opens settings. **`Esc` no longer quits** — `Ctrl+Q` does.
 
 ## Paths
 
 XDG-split, and both honor their env vars:
 
-- Cache (disposable): `~/.local/share/zaptv/` — `playlist.m3u`, `epg.xml.gz`, later `logos/`. Refreshed when >24h old.
+- Cache (disposable): `~/.local/share/zaptv/` — `playlist.m3u`, `epg.xml.gz`, `logos/`. Playlist and guide refresh when >24h old; logos are cached forever under a hash of their URL plus the render size.
 - Config (user intent): `~/.config/zaptv/` — `settings.json`, `favorites.json`, `recent.json`.
 
 Favorites and recents are keyed by **channel name**, not `(name, group)`, matching the flat JSON list in `SPEC.md`. That keeps a favorite alive when a channel changes group in an updated playlist; the cost is that two channels sharing a name across groups are favorited together. All three JSON files fall back to defaults rather than raising when corrupt — a bad config file must never stop playback.

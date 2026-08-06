@@ -33,12 +33,17 @@ def is_stale(path: Path = PLAYLIST_PATH, max_age: int = MAX_AGE_SECONDS) -> bool
     return (time.time() - path.stat().st_mtime) > max_age
 
 
+def fetch(url: str, timeout: int = _TIMEOUT) -> bytes:
+    """GET a URL and return the body."""
+    request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read()
+
+
 def download(path: Path = PLAYLIST_PATH, url: str = PLAYLIST_URL) -> Path:
     """Fetch a resource, replacing the cache only once the body is in hand."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
-    with urllib.request.urlopen(request, timeout=_TIMEOUT) as response:
-        body = response.read()
+    body = fetch(url)
 
     tmp = path.with_suffix(path.suffix + ".part")
     tmp.write_bytes(body)

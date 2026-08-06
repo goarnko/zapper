@@ -9,6 +9,7 @@ Channels come from the [TDTChannels](https://www.tdtchannels.com/) playlist and 
 - Python 3.13+
 - Tkinter — `sudo apt install python3-tk`
 - VLC — `sudo apt install vlc`
+- Pillow — installed with the package; needed to decode channel logos
 
 ## Usage
 
@@ -33,7 +34,8 @@ Add `--search <query>` to filter the TSV output, or `--now` to print what is on 
 | `Enter` | Play the selected channel |
 | `Ctrl+F` | Jump to the search box |
 | `F` | Favorite / unfavorite |
-| `Ctrl+R` | Update the playlist now |
+| `Ctrl+R` | Update the playlist and guide now |
+| `Ctrl+,` | Open settings |
 | `Esc` | Clear the search |
 | `Ctrl+Q` | Quit |
 
@@ -49,9 +51,15 @@ Guide data covers about a quarter of the channel list — the playlist rarely ca
 
 The playlist is cached in `~/.local/share/zaptv/` and refreshed automatically when it is more than 24 hours old. Settings, favorites and recents live in `~/.config/zaptv/`.
 
+## Appearance
+
+Light and dark themes, channel logos, and a settings window (`Ctrl+,`) for the player,
+theme, logos and automatic updates. Settings are saved to `~/.config/zaptv/settings.json`.
+
 ## Status
 
-Milestone 3 — browse, search, favorites, recents, Now/Next guide. Channel logos and further polish are planned.
+Milestone 4 — browse, search, favorites, recents, Now/Next guide, logos and theming.
+Multiple playlist providers are next.
 
 - [SPEC.md](SPEC.md) — what the app is and is not
 - [STACK.md](STACK.md) — technology decisions
