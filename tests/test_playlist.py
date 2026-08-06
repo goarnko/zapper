@@ -82,3 +82,55 @@ def test_ignores_headers_stray_urls_and_blank_lines():
 def test_extinf_without_a_url_is_dropped():
     text = '#EXTINF:-1 group-title="G",Dangling\n'
     assert playlist.parse(text) == []
+
+
+# -- merging across providers -------------------------------------------
+
+
+def test_merge_pools_streams_for_the_same_channel():
+    a = playlist.parse('#EXTINF:-1 group-title="G",La 1\nhttps://a.invalid/1\n', "A")
+    b = playlist.parse('#EXTINF:-1 group-title="G",La 1\nhttps://b.invalid/2\n', "B")
+    (channel,) = playlist.merge([a, b])
+    assert channel.streams == ["https://a.invalid/1", "https://b.invalid/2"]
+
+
+def test_merge_keeps_the_first_providers_metadata():
+    a = playlist.parse('#EXTINF:-1 tvg-id="X" group-title="G",La 1\nhttps://a.invalid/1\n', "A")
+    b = playlist.parse('#EXTINF:-1 tvg-id="Y" group-title="G",La 1\nhttps://b.invalid/2\n', "B")
+    (channel,) = playlist.merge([a, b])
+    assert channel.provider == "A"
+    assert channel.tvg_id == "X"
+
+
+def test_merge_fills_metadata_the_first_provider_lacked():
+    a = playlist.parse('#EXTINF:-1 group-title="G",La 1\nhttps://a.invalid/1\n', "A")
+    b = playlist.parse(
+        '#EXTINF:-1 tvg-id="Y" tvg-logo="http://l/x.png" group-title="G",La 1\n'
+        "https://b.invalid/2\n",
+        "B",
+    )
+    (channel,) = playlist.merge([a, b])
+    assert channel.tvg_id == "Y"
+    assert channel.logo == "http://l/x.png"
+
+
+def test_merge_keeps_distinct_channels_apart():
+    a = playlist.parse('#EXTINF:-1 group-title="G",La 1\nhttps://a.invalid/1\n', "A")
+    b = playlist.parse('#EXTINF:-1 group-title="G",Antena 3\nhttps://b.invalid/2\n', "B")
+    assert len(playlist.merge([a, b])) == 2
+
+
+def test_merge_does_not_duplicate_an_identical_stream():
+    a = playlist.parse('#EXTINF:-1 group-title="G",La 1\nhttps://same.invalid/1\n', "A")
+    b = playlist.parse('#EXTINF:-1 group-title="G",La 1\nhttps://same.invalid/1\n', "B")
+    (channel,) = playlist.merge([a, b])
+    assert channel.streams == ["https://same.invalid/1"]
+
+
+def test_merge_of_nothing_is_empty():
+    assert playlist.merge([]) == []
+
+
+def test_parse_records_the_provider():
+    (channel,) = playlist.parse('#EXTINF:-1 group-title="G",X\nhttps://a.invalid/1\n', "Src")
+    assert channel.provider == "Src"

@@ -2,7 +2,7 @@
 
 import sys
 
-from . import epg, playlist, search, updater
+from . import epg, providers, search, updater
 from .settings import Settings
 from .storage import Favorites, Recent
 
@@ -17,20 +17,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config = Settings.load()
+    sources = providers.ProviderList.load()
 
-    try:
-        path = updater.ensure() if config.auto_update else updater.PLAYLIST_PATH
-    except OSError as exc:
-        print(f"Could not download the channel list: {exc}", file=sys.stderr)
-        return 1
+    if "--providers" in argv:
+        return _print_providers(sources)
 
-    if not path.exists():
-        print(f"No cached playlist at {path} and auto-update is off.", file=sys.stderr)
-        return 1
+    channels, failed = sources.load_channels(refresh=config.auto_update)
+    for name in failed:
+        print(f"Provider unavailable: {name}", file=sys.stderr)
 
-    channels = playlist.load(path)
     if not channels:
-        print(f"No channels found in {path}", file=sys.stderr)
+        print("No channels from any enabled provider.", file=sys.stderr)
         return 1
 
     if "--search" in argv:
@@ -45,7 +42,9 @@ def main(argv: list[str] | None = None) -> int:
         favorites = Favorites.load()
         for channel in sorted(channels, key=lambda c: (search.normalize(c.group), search.sort_key(c))):
             marker = "*" if channel.name in favorites else " "
-            print(f"{marker}\t{channel.group}\t{channel.name}\t{channel.stream}")
+            print(
+                f"{marker}\t{channel.provider}\t{channel.group}\t{channel.name}\t{channel.stream}"
+            )
         return 0
 
     try:
@@ -58,7 +57,17 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    ui.run(channels, config, Favorites.load(), Recent.load(), _load_guide(config))
+    ui.run(channels, config, Favorites.load(), Recent.load(), _load_guide(config), sources)
+    return 0
+
+
+def _print_providers(sources: "providers.ProviderList") -> int:
+    """List configured sources and where each one caches."""
+    for provider in sources:
+        state = "on " if provider.enabled else "off"
+        kind = "file" if provider.is_local else "url "
+        builtin = " (built-in)" if provider.builtin else ""
+        print(f"[{state}] {kind}  {provider.name}{builtin}\n        {provider.url}")
     return 0
 
 

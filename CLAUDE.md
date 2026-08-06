@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Milestones 1–4 are done: download → parse → browse → play, settings, search with instant filtering, favorites, recently-watched, a Now/Next guide from XMLTV, channel logos, light/dark themes, a settings window and an app icon. Milestone 5 (multiple providers) is next.
+Milestones 1–5 are done: download → parse → browse → play, settings, search, favorites, recently-watched, a Now/Next guide from XMLTV, channel logos, light/dark themes, a settings window, an app icon, and multiple playlist providers with merging.
+
+**Not** done in Milestone 5: Pluto TV is not bundled as a named provider. Users can add its M3U by URL, but there is no built-in entry for it.
 
 Note the git repo is named `zapper` but the project is **ZapTV** (`zaptv`) — the rename happened after the repo was created.
 
@@ -23,6 +25,7 @@ PYTHONPATH=src python3 -m zaptv                    # run the GUI
 PYTHONPATH=src python3 -m zaptv --list             # channels as TSV (no GUI needed)
 PYTHONPATH=src python3 -m zaptv --search malaga    # same, filtered
 PYTHONPATH=src python3 -m zaptv --now              # Now/Next per channel
+PYTHONPATH=src python3 -m zaptv --providers        # configured playlist sources
 python3 -m pytest tests -q                         # tests
 python3 -m ruff check src tests                    # lint
 python3 -m mypy                                    # type check (config in pyproject)
@@ -38,7 +41,8 @@ These come from `SPEC.md`/`STACK.md`; don't relitigate them without the user ask
 
 - **Near-zero runtime dependencies.** M3U parsing is hand-rolled, EPG uses stdlib `gzip` + `xml.etree.ElementTree`, networking is `urllib.request` (not requests/curl/wget), storage is plain JSON. **Pillow is the one deliberate exception**, agreed for Milestone 4: nearly every channel logo is JPEG and Tk's `PhotoImage` reads only PNG/GIF, so there is no stdlib path to logos. Don't add a second dependency without asking. Dev tooling (pytest/ruff/mypy) doesn't count.
 - **No video playback in-process, ever.** Players live behind the `Player` ABC in `player.py`; a new backend is a new subclass plus a `PLAYERS` entry. `VLCPlayer` is the default, `MPVPlayer` exists for Milestone 6.
-- **Channels are never hardcoded or shipped.** The playlist is always downloaded from a provider at runtime.
+- **Channels are never hardcoded or shipped.** Playlists are always downloaded (or read from a user's file) at runtime.
+- **The built-in TDTChannels provider can be disabled but never deleted.** Removing it by accident would leave a new user with an empty app and no route back; `ProviderList.load` re-inserts it if a config file lacks it.
 - **Not a media center.** No library, movies, series, music, PVR, torrents, streaming server, accounts, or cloud sync. `ROADMAP.md` lists these as explicitly out of scope.
 
 ## UI conventions
@@ -57,14 +61,25 @@ The list is a **`ttk.Treeview`**, not a `Listbox` — only Treeview supports a p
 
 Theming lives in `theme.py`. ttk ignores widget-level colour options, so the Treeview and the settings dialog need configured *styles* (`style_dialog`), and the `clam` theme is used because the default Linux ttk theme ignores Treeview background settings entirely.
 
-Shortcuts follow `SPEC.md`: Enter plays, `Ctrl+F` focuses search, `F` favorites, `Ctrl+R` forces a playlist and guide update, `Esc` clears the search, `Ctrl+,` opens settings. **`Esc` no longer quits** — `Ctrl+Q` does.
+Shortcuts follow `SPEC.md`: Enter plays, `Ctrl+F` focuses search, `F` favorites, `Ctrl+R` forces a playlist and guide update, `Esc` clears the search, `Ctrl+,` opens settings, `Ctrl+P` opens the playlist sources window. **`Esc` no longer quits** — `Ctrl+Q` does.
+
+## Providers
+
+`providers.py` owns playlist sources. A provider is a name plus an M3U source — an http(s) URL to download or a local file to read (`is_local` covers bare paths and `file://`).
+
+- **Each provider caches separately**, in `playlists/<slug>.m3u`, so one unreachable source never invalidates another's channels.
+- **Failures are reported, not swallowed.** `load_channels` returns `(channels, failed_names)`; the UI puts the failing names in the status bar rather than silently showing a shorter list. An empty playlist counts as a failure.
+- **Merging happens on `(name, group)`** — the same key `playlist.parse` uses for mirrors within one file. A second source offering the same channel contributes another stream rather than a duplicate row, and the *first* provider to supply a channel owns its metadata, so provider order is preference order. Gaps (missing `tvg_id`/`logo`) are filled from later sources without overwriting.
+- `migrate_legacy_cache` moves the pre-Milestone-5 `playlist.m3u` into the built-in's per-provider cache, so upgrading doesn't force a re-download.
+
+This is the machinery the Atresmedia/Mediaset note under Milestone 5 refers to: pointing ZapTV at a list carrying working URLs for those channels now works end to end (verified with a local M3U adding Antena 3).
 
 ## Paths
 
 XDG-split, and both honor their env vars:
 
-- Cache (disposable): `~/.local/share/zaptv/` — `playlist.m3u`, `epg.xml.gz`, `logos/`. Playlist and guide refresh when >24h old; logos are cached forever under a hash of their URL plus the render size.
-- Config (user intent): `~/.config/zaptv/` — `settings.json`, `favorites.json`, `recent.json`.
+- Cache (disposable): `~/.local/share/zaptv/` — `playlists/<slug>.m3u` (one per provider), `epg.xml.gz`, `logos/`. Playlists and guide refresh when >24h old; logos are cached forever under a hash of their URL plus the render size.
+- Config (user intent): `~/.config/zaptv/` — `settings.json`, `providers.json`, `favorites.json`, `recent.json`.
 
 Favorites and recents are keyed by **channel name**, not `(name, group)`, matching the flat JSON list in `SPEC.md`. That keeps a favorite alive when a channel changes group in an updated playlist; the cost is that two channels sharing a name across groups are favorited together. All three JSON files fall back to defaults rather than raising when corrupt — a bad config file must never stop playback.
 

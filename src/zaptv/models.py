@@ -17,6 +17,9 @@ class Channel:
     logo: str | None = None
     tvg_id: str | None = None
     favorite: bool = False
+    #: Name of the provider this channel came from. When the same channel is
+    #: offered by several sources, this is the first one that supplied it.
+    provider: str = ""
 
     @property
     def stream(self) -> str:

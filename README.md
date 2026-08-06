@@ -25,7 +25,8 @@ PYTHONPATH=src python3 -m zaptv           # open the channel list
 PYTHONPATH=src python3 -m zaptv --list    # print channels as TSV instead
 ```
 
-Add `--search <query>` to filter the TSV output, or `--now` to print what is on air.
+Add `--search <query>` to filter the TSV output, `--now` to print what is on air, or
+`--providers` to list the configured playlists.
 
 ## Keyboard
 
@@ -36,6 +37,7 @@ Add `--search <query>` to filter the TSV output, or `--now` to print what is on 
 | `F` | Favorite / unfavorite |
 | `Ctrl+R` | Update the playlist and guide now |
 | `Ctrl+,` | Open settings |
+| `Ctrl+P` | Manage playlists |
 | `Esc` | Clear the search |
 | `Ctrl+Q` | Quit |
 
@@ -56,10 +58,18 @@ The playlist is cached in `~/.local/share/zaptv/` and refreshed automatically wh
 Light and dark themes, channel logos, and a settings window (`Ctrl+,`) for the player,
 theme, logos and automatic updates. Settings are saved to `~/.config/zaptv/settings.json`.
 
+## Playlists
+
+ZapTV ships with the TDTChannels list and can merge in others — press `Ctrl+P` to add a
+playlist by URL or from a local `.m3u` file. When two sources carry the same channel their
+streams are pooled, so the second becomes a fallback rather than a duplicate row.
+
+The built-in list can be disabled but not removed.
+
 ## Status
 
-Milestone 4 — browse, search, favorites, recents, Now/Next guide, logos and theming.
-Multiple playlist providers are next.
+Milestone 5 — browse, search, favorites, recents, Now/Next guide, logos, theming and
+multiple playlist sources.
 
 - [SPEC.md](SPEC.md) — what the app is and is not
 - [STACK.md](STACK.md) — technology decisions

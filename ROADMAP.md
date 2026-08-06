@@ -148,9 +148,10 @@ gate live playback behind their own platforms (Atresplayer, Mitele). The
 XMLTV guide *does* carry them, so they already appear as programme data
 with no stream to play.
 
-This milestone supplies the plumbing: pointing ZapTV at a list that
-carries working URLs for them is enough. If no such list exists, they
-instead need a player that can open the broadcaster's web player — see
+This milestone supplies the plumbing, and it is now built: pointing ZapTV
+at a list that carries working URLs for them works end to end (add it
+with Ctrl+P, by URL or local file). If no such list exists, they instead
+need a player that can open the broadcaster's web player — see
 Milestone 6.
 
 Deliverable

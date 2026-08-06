@@ -30,7 +30,7 @@ def _parse_extinf(line: str) -> tuple[dict[str, str], str]:
     return attrs, name
 
 
-def parse(text: str) -> list[Channel]:
+def parse(text: str, provider: str = "") -> list[Channel]:
     """Parse playlist text into channels, merging each channel's mirrors.
 
     Entries are keyed by (name, group) because tvg-id is absent from most of
@@ -68,6 +68,7 @@ def parse(text: str) -> list[Channel]:
                 group=group,
                 logo=attrs.get("tvg-logo") or None,
                 tvg_id=attrs.get("tvg-id") or None,
+                provider=provider,
             )
             channels[(name, group)] = channel
 
@@ -77,5 +78,31 @@ def parse(text: str) -> list[Channel]:
     return [c for c in channels.values() if c.streams]
 
 
-def load(path) -> list[Channel]:
-    return parse(path.read_text(encoding="utf-8", errors="replace"))
+def load(path, provider: str = "") -> list[Channel]:
+    return parse(path.read_text(encoding="utf-8", errors="replace"), provider)
+
+
+def merge(sources: list[list[Channel]]) -> list[Channel]:
+    """Combine channel lists from several providers into one.
+
+    Channels are matched on (name, group), the same key used for mirrors
+    within a single playlist, and their streams are pooled — a second source
+    offering the same channel becomes another fallback rather than a
+    duplicate row. The first provider to supply a channel owns its metadata,
+    so ordering the sources orders the preference.
+    """
+    merged: dict[tuple[str, str], Channel] = {}
+    for channels in sources:
+        for channel in channels:
+            key = (channel.name, channel.group)
+            existing = merged.get(key)
+            if existing is None:
+                merged[key] = channel
+                continue
+            for stream in channel.streams:
+                if stream not in existing.streams:
+                    existing.streams.append(stream)
+            # Fill gaps the earlier provider left, without overwriting it.
+            existing.logo = existing.logo or channel.logo
+            existing.tvg_id = existing.tvg_id or channel.tvg_id
+    return list(merged.values())

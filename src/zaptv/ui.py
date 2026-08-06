@@ -10,12 +10,14 @@ show a per-row image, and channel logos are the point of Milestone 4.
 """
 
 import tkinter as tk
-from tkinter import font as tkfont
-from tkinter import messagebox, ttk
+from pathlib import Path
+from tkinter import filedialog, font as tkfont
+from tkinter import messagebox, simpledialog, ttk
 
 from . import epg as epg_module
 from . import logos as logos_module
-from . import playlist, search, theme, updater
+from . import providers as providers_module
+from . import search, theme, updater
 from .models import Channel, Programme
 from .player import PLAYERS, Player, PlayerNotFound, get_player
 from .settings import Settings
@@ -141,6 +143,152 @@ def style_dialog(style: ttk.Style, palette: theme.Palette) -> None:
         background=[("active", palette.select_bg)],
         foreground=[("active", palette.select_fg)],
     )
+    # Column headings are their own element; without this they stay light
+    # grey above a dark table. The main window's list has no headings, so
+    # configuring the shared style here is safe.
+    style.configure(
+        "Treeview.Heading",
+        background=palette.field_bg,
+        foreground=palette.fg,
+        relief=tk.FLAT,
+    )
+    style.map("Treeview.Heading", background=[("active", palette.select_bg)])
+
+
+class ProvidersWindow(tk.Toplevel):
+    """Add, remove and toggle playlist sources.
+
+    The built-in source can be disabled but not deleted: losing it by
+    accident would leave a new user with an empty app and no way back.
+    """
+
+    def __init__(
+        self,
+        master: tk.Misc,
+        sources: providers_module.ProviderList,
+        palette: theme.Palette,
+        on_change,
+    ):
+        super().__init__(master)
+        self.title("ZapTV Playlists")
+        self.geometry("640x360")
+        self.minsize(600, 300)
+        self.transient(master.winfo_toplevel())
+        self.configure(bg=palette.bg)
+        style_dialog(ttk.Style(self), palette)
+        self._sources = sources
+        self._on_change = on_change
+        self._dirty = False
+
+        body = ttk.Frame(self, padding=12, style="Zap.TFrame")
+        body.pack(fill=tk.BOTH, expand=True)
+
+        self.tree = ttk.Treeview(
+            body, columns=("url",), show="tree headings", selectmode="browse", height=8
+        )
+        self.tree.heading("#0", text="Playlist")
+        self.tree.heading("url", text="Source")
+        self.tree.column("#0", width=180, stretch=False)
+        self.tree.column("url", width=300)
+        self.tree.pack(fill=tk.BOTH, expand=True)
+        self.tree.bind("<Double-Button-1>", lambda _e: self._toggle())
+
+        buttons = ttk.Frame(body, style="Zap.TFrame")
+        buttons.pack(fill=tk.X, pady=(10, 0))
+        for text, command in (
+            ("Add URL…", self._add_url),
+            ("Add file…", self._add_file),
+            ("Enable/Disable", self._toggle),
+            ("Remove", self._remove),
+        ):
+            ttk.Button(buttons, text=text, command=command, style="Zap.TButton").pack(
+                side=tk.LEFT, padx=(0, 6)
+            )
+        ttk.Button(buttons, text="Close", command=self._close, style="Zap.TButton").pack(
+            side=tk.RIGHT
+        )
+
+        self.bind("<Escape>", lambda _e: self._close())
+        self._populate()
+
+    def _populate(self) -> None:
+        self.tree.delete(*self.tree.get_children())
+        for provider in self._sources:
+            mark = "☑" if provider.enabled else "☐"
+            suffix = "  (built-in)" if provider.builtin else ""
+            self.tree.insert(
+                "", tk.END, iid=provider.name, text=f"{mark} {provider.name}{suffix}",
+                values=(provider.url,),
+            )
+
+    def _selected_name(self) -> str | None:
+        selection = self.tree.selection()
+        return selection[0] if selection else None
+
+    def _changed(self) -> None:
+        self._dirty = True
+        self._populate()
+
+    def _toggle(self) -> None:
+        name = self._selected_name()
+        if name is None:
+            return
+        provider = self._sources.get(name)
+        if provider is None:
+            return
+        self._sources.set_enabled(name, not provider.enabled)
+        self._changed()
+
+    def _remove(self) -> None:
+        name = self._selected_name()
+        if name is None:
+            return
+        if not self._sources.remove(name):
+            messagebox.showinfo(
+                "Built-in playlist",
+                "The built-in playlist cannot be removed, only disabled.",
+                parent=self,
+            )
+            return
+        self._changed()
+
+    def _add_url(self) -> None:
+        url = simpledialog.askstring("Add playlist", "Playlist URL:", parent=self)
+        if not url:
+            return
+        name = simpledialog.askstring(
+            "Add playlist", "Name for this playlist:", parent=self, initialvalue=url
+        )
+        if not name:
+            return
+        self._sources.add(name, url)
+        self._changed()
+
+    def _add_file(self) -> None:
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Choose an M3U playlist",
+            filetypes=[("M3U playlists", "*.m3u *.m3u8"), ("All files", "*")],
+        )
+        if not path:
+            return
+        name = simpledialog.askstring(
+            "Add playlist",
+            "Name for this playlist:",
+            parent=self,
+            initialvalue=Path(path).stem,
+        )
+        if not name:
+            return
+        self._sources.add(name, path)
+        self._changed()
+
+    def _close(self) -> None:
+        # Reloading several hundred channels is not free, so only do it when
+        # the source list actually changed.
+        if self._dirty:
+            self._on_change()
+        self.destroy()
 
 
 class SettingsWindow(tk.Toplevel):
@@ -230,6 +378,7 @@ class ChannelBrowser(tk.Frame):
         guide: epg_module.Guide | None = None,
         config: Settings | None = None,
         logo_store: logos_module.LogoStore | None = None,
+        sources: providers_module.ProviderList | None = None,
     ):
         super().__init__(master)
         self._channels = channels
@@ -238,6 +387,7 @@ class ChannelBrowser(tk.Frame):
         self._recent = recent
         self._guide = guide or epg_module.Guide()
         self._config = config or Settings()
+        self._sources = sources
         self._palette = theme.get(self._config.theme)
 
         self._logos = logo_store
@@ -521,30 +671,46 @@ class ChannelBrowser(tk.Frame):
         SettingsWindow(self, self._config, self._palette, self.retheme)
         return "break"
 
-    def reload(self, _event: object = None) -> str:
-        """Force a playlist and guide download, keeping the old data if it fails."""
-        self.status.config(text="Updating…")
-        self.update_idletasks()
-        try:
-            path = updater.download()
-            channels = playlist.load(path)
-        except OSError as exc:
-            messagebox.showerror("Update failed", str(exc), parent=self)
-            self._refresh()
+    def open_providers(self, _event: object = None) -> str:
+        if self._sources is None:
+            return "break"
+        ProvidersWindow(self, self._sources, self._palette, self._reload_channels)
+        return "break"
+
+    def _reload_channels(self, force: bool = False) -> str:
+        """Re-read channels from the configured providers.
+
+        Keeps the current list when every source fails, so a dropped network
+        never empties the window.
+        """
+        if self._sources is None:
             return "break"
 
+        self.status.config(text="Loading playlists…")
+        self.update_idletasks()
+        max_age = 0 if force else updater.MAX_AGE_SECONDS
+        channels, failed = self._sources.load_channels(max_age=max_age)
         if channels:
             self._channels = channels
+
+        self._refresh()
+        if failed:
+            self.status.config(text=f"Unavailable: {', '.join(failed)}")
+            self.update_idletasks()
+        return "break"
+
+    def reload(self, _event: object = None) -> str:
+        """Force a refresh of every playlist and the guide."""
+        self._reload_channels(force=True)
 
         # The guide is optional: a failure here should not spoil a successful
         # playlist refresh, so it is reported only in the status line.
         try:
             self._guide = epg_module.load(updater.download_epg())
+            self._update_guide()
         except OSError:
-            self.status.config(text="Channel list updated; guide unavailable")
+            self.status.config(text="Channel lists updated; guide unavailable")
             self.update_idletasks()
-
-        self._refresh()
         return "break"
 
 
@@ -554,6 +720,7 @@ def run(
     favorites: Favorites | None = None,
     recent: Recent | None = None,
     guide: epg_module.Guide | None = None,
+    sources: providers_module.ProviderList | None = None,
 ) -> None:
     config = config or Settings.load()
 
@@ -572,6 +739,7 @@ def run(
         guide,
         config,
         store,
+        sources,
     )
     browser.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
     root.config(bg=browser._palette.bg)
@@ -579,6 +747,7 @@ def run(
     root.bind("<Control-f>", browser.focus_search)
     root.bind("<Control-r>", browser.reload)
     root.bind("<Control-comma>", browser.open_settings)
+    root.bind("<Control-p>", browser.open_providers)
     root.bind("<Escape>", browser.clear_search)
     root.bind("<Control-q>", lambda _e: root.destroy())
 
