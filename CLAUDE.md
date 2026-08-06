@@ -45,6 +45,7 @@ These come from `SPEC.md`/`STACK.md`; don't relitigate them without the user ask
 `ui.py` holds only widget wiring; matching and ordering live in `search.py` so they can be tested without a display (Tkinter is unavailable here — see below).
 
 - The list is rebuilt from scratch on every keystroke, favorite toggle, and play. `_refresh` therefore saves and restores the selection; without that, favoriting throws the user back to the top of ~471 channels.
+- **`see()` on an unmapped listbox scrolls its target to the very top**, hiding the section header above it — the list then looks unlabelled at startup. `_restore_selection` uses `yview_moveto(0)` when nothing carried over (startup, or a search that dropped the selection) and only calls `see()` when genuinely restoring a selection, by which point the widget is mapped. `after_idle` does *not* fix this: idle callbacks run before the window is mapped. `tests/test_ui_scroll.py` guards it.
 - A favorited channel appears **twice** — once under `★ FAVORITES`, once in its group. `_index_of` deliberately returns the *last* match so selection lands on the group copy, keeping neighbours in view.
 - Something is always selected, so Enter plays straight after typing a search without an arrow key in between.
 - Search is accent-insensitive in both directions (`malaga` ↔ `Málaga`) because Spanish channel names are full of accents users don't type. Tokens are ANDed.
@@ -73,10 +74,17 @@ Verified against the live TDTChannels list — these shaped the parser and will 
 
 ## Environment gotchas
 
-This machine cannot run the GUI or pytest as-is:
-
-- **Python is 3.12.3, but `pyproject.toml` requires >=3.13** per `STACK.md`. `pip install -e .` will refuse. The code itself avoids 3.13-only syntax, so `PYTHONPATH=src python3 -m zaptv` still runs.
-- **Tkinter is not installed** — `sudo apt install python3-tk`. `main.py` catches the ImportError and points at the fix.
-- **No `pip`, no `venv`** — `sudo apt install python3-venv`. Until then pytest/ruff/mypy cannot be installed and the test functions have to be driven by a stdlib runner that shims `tmp_path` and `monkeypatch`.
+- **Python is 3.12.3, but `pyproject.toml` requires >=3.13** per `STACK.md`. `pip install -e .` will refuse, so run via `PYTHONPATH=src python3 -m zaptv`. The code avoids 3.13-only syntax.
+- **No `pip`, no `venv`** — `sudo apt install python3-venv`. Until then pytest/ruff/mypy cannot be installed and tests must be driven by a stdlib runner that shims `tmp_path` and `monkeypatch`.
+- Tkinter **is** installed (Tk 8.6) and the session is Wayland with XWayland on `:0`, so the GUI runs.
 
 VLC is present at `/usr/bin/vlc`; mpv is not installed.
+
+To inspect the GUI without a screenshot tool (only `xwd` and `xwininfo` are available, and `xwd -root` fails under XWayland):
+
+```bash
+DISPLAY=:0 xwininfo -root -tree | grep '"Tk")'    # find the window id (field 1)
+DISPLAY=:0 xwd -id <id> -silent -out win.xwd      # capture that window, not the root
+```
+
+`xwd` output needs converting — PIL is available but has no XWD reader, so parse the 100-byte big-endian header and build the image from `raw`/`BGRX`. Beware: `grep -oP '0x[0-9a-f]+'` on the `xwininfo` line matches `0x640` inside the geometry `420x640`; take field 1 instead. Multiple instances appear as `("tk" "Tk")`, `("tk #2" "Tk")`.

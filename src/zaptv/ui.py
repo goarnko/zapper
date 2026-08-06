@@ -133,14 +133,25 @@ class ChannelBrowser(tk.Frame):
         Always leaving something selected means Enter works straight after
         typing a search, with no arrow key in between.
         """
-        target = self._index_of(previous) if previous is not None else None
+        restored = self._index_of(previous) if previous is not None else None
+        target = restored
         if target is None:
             target = next((i for i, row in enumerate(self._rows) if row is not None), None)
         if target is None:
             return
+
         self.listbox.selection_clear(0, tk.END)
         self.listbox.selection_set(target)
-        self.listbox.see(target)
+
+        if restored is None:
+            # Nothing carried over — startup, or a search that dropped the old
+            # selection. Show the list from the very top; see() here would put
+            # the first channel flush against the top edge and scroll its
+            # section header out of sight.
+            self.listbox.yview_moveto(0.0)
+        else:
+            self.listbox.see(max(target - 1, 0))
+            self.listbox.see(target)
 
     def _index_of(self, channel: Channel) -> int | None:
         """Row of a channel, preferring its group entry over its favorites copy.
