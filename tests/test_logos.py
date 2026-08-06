@@ -2,7 +2,7 @@ import io
 
 from PIL import Image
 
-from zaptv import logos
+from zaptv import logos, updater
 
 
 def png_bytes(size=(200, 120), mode="RGB"):
@@ -33,7 +33,8 @@ def test_cache_path_survives_query_strings():
 
 
 def test_cache_path_changes_with_size():
-    assert logos.cache_path("https://x.invalid/a", 24) != logos.cache_path("https://x.invalid/a", 48)
+    url = "https://x.invalid/a"
+    assert logos.cache_path(url, 24) != logos.cache_path(url, 48)
 
 
 def test_convert_writes_a_downscaled_png(tmp_path):
@@ -65,7 +66,7 @@ def test_prepare_reuses_the_cache_without_downloading(tmp_path, monkeypatch):
     def explode(*_a, **_k):
         raise AssertionError("should not download when cached")
 
-    monkeypatch.setattr(logos.updater, "fetch", explode)
+    monkeypatch.setattr(updater, "fetch", explode)
     assert logos.prepare("https://example.invalid/a.png") == path
 
 
@@ -75,13 +76,13 @@ def test_prepare_returns_none_on_a_network_error(tmp_path, monkeypatch):
     def explode(*_a, **_k):
         raise OSError("no network")
 
-    monkeypatch.setattr(logos.updater, "fetch", explode)
+    monkeypatch.setattr(updater, "fetch", explode)
     assert logos.prepare("https://example.invalid/a.png") is None
 
 
 def test_prepare_returns_none_on_undecodable_bytes(tmp_path, monkeypatch):
     monkeypatch.setattr(logos, "cache_path", lambda _url, _size=24: tmp_path / "x.png")
-    monkeypatch.setattr(logos.updater, "fetch", lambda *_a, **_k: b"<html>not an image</html>")
+    monkeypatch.setattr(updater, "fetch", lambda *_a, **_k: b"<html>not an image</html>")
     assert logos.prepare("https://example.invalid/a.png") is None
 
 

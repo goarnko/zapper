@@ -10,7 +10,8 @@ invalidates another's channels.
 
 import json
 import re
-from dataclasses import asdict, dataclass, field, fields
+from collections.abc import Iterator
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -156,7 +157,7 @@ class ProviderList:
 
     # -- collection ------------------------------------------------------
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Provider]:
         return iter(self._providers)
 
     def __len__(self) -> int:

@@ -17,8 +17,12 @@ would not.
 """
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .settings import config_dir
+
+if TYPE_CHECKING:
+    from .providers import ProviderList
 
 PROVIDER_NAME = "Web channels"
 GROUP = "Generalistas"
@@ -56,7 +60,9 @@ def playlist_path() -> Path:
     return config_dir() / "web-channels.m3u"
 
 
-def render(channels=SEED_CHANNELS, group: str = GROUP) -> str:
+def render(
+    channels: list[tuple[str, str, str]] = SEED_CHANNELS, group: str = GROUP
+) -> str:
     lines = [HEADER]
     for name, url, tvg_id in channels:
         attrs = f'zaptv-player="browser" group-title="{group}"'
@@ -76,7 +82,7 @@ def write_seed(path: Path | None = None) -> Path:
     return path
 
 
-def install(sources, path: Path | None = None) -> bool:
+def install(sources: "ProviderList", path: Path | None = None) -> bool:
     """Create the playlist and register it, once.
 
     Returns True when something was set up. Deleting the provider is

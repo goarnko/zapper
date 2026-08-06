@@ -102,10 +102,26 @@ watch, and the file is yours to edit or remove.
 The seven Mediaset channels also show Now/Next; the Atresmedia ones have no guide data
 because the TDTChannels EPG does not carry them.
 
+## Development
+
+```bash
+pip install -e ".[dev]"
+
+pytest tests -q          # unit tests
+ruff check src tests     # lint
+mypy                     # type check (strict)
+
+ZAPTV_INTEGRATION=1 pytest tests/test_integration.py -q   # hits the live feeds
+```
+
+Integration tests are off by default: they need the network and exist to catch the
+upstream feeds changing shape. CI runs them weekly.
+
 ## Status
 
-Milestone 6 — browse, search, favorites, recents, Now/Next guide, logos, theming,
-multiple playlist sources and selectable players (VLC, mpv, browser).
+Milestone 8 — feature complete against the roadmap, bar application self-update.
+Browse, search, favorites, recents, Now/Next guide, logos, theming, multiple playlist
+sources, selectable players (VLC, mpv, browser), packaging and CI.
 
 - [SPEC.md](SPEC.md) — what the app is and is not
 - [STACK.md](STACK.md) — technology decisions

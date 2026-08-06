@@ -1,3 +1,5 @@
+import shutil
+
 from zaptv import player
 
 
@@ -21,7 +23,7 @@ def test_args_put_the_stream_last():
 
 
 def test_missing_executable_raises(monkeypatch):
-    monkeypatch.setattr(player.shutil, "which", lambda _cmd: None)
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
     instance = player.MPVPlayer()
     assert not instance.is_available()
     try:
@@ -50,18 +52,22 @@ def test_browser_player_passes_the_page_url_through():
 
 def test_browser_player_falls_back_to_webbrowser(monkeypatch):
     """Minimal desktops have no xdg-open; Python's opener knows other ways."""
-    monkeypatch.setattr(player.shutil, "which", lambda _cmd: None)
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
     opened = []
     import webbrowser
 
-    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url) or True)
+    def fake_open(url):
+        opened.append(url)
+        return True
+
+    monkeypatch.setattr(webbrowser, "open", fake_open)
 
     assert player.BrowserPlayer().play("https://example.invalid/live") is None
     assert opened == ["https://example.invalid/live"]
 
 
 def test_browser_player_raises_when_nothing_can_open_a_page(monkeypatch):
-    monkeypatch.setattr(player.shutil, "which", lambda _cmd: None)
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
     import webbrowser
 
     monkeypatch.setattr(webbrowser, "open", lambda _url: False)
@@ -77,29 +83,33 @@ def test_browser_player_raises_when_nothing_can_open_a_page(monkeypatch):
 
 
 def test_available_lists_only_installed_backends(monkeypatch):
-    monkeypatch.setattr(player.shutil, "which", lambda cmd: "/usr/bin/vlc" if cmd == "vlc" else None)
+    monkeypatch.setattr(
+        shutil, "which", lambda cmd: "/usr/bin/vlc" if cmd == "vlc" else None
+    )
     assert player.available() == ["vlc"]
 
 
 def test_available_can_be_empty(monkeypatch):
-    monkeypatch.setattr(player.shutil, "which", lambda _cmd: None)
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
     assert player.available() == []
 
 
 def test_resolve_keeps_an_installed_choice(monkeypatch):
-    monkeypatch.setattr(player.shutil, "which", lambda _cmd: "/usr/bin/x")
+    monkeypatch.setattr(shutil, "which", lambda _cmd: "/usr/bin/x")
     assert isinstance(player.resolve("mpv"), player.MPVPlayer)
 
 
 def test_resolve_substitutes_an_uninstalled_choice(monkeypatch):
     """A player removed after being configured must not fail at play time."""
-    monkeypatch.setattr(player.shutil, "which", lambda cmd: "/usr/bin/vlc" if cmd == "vlc" else None)
+    monkeypatch.setattr(
+        shutil, "which", lambda cmd: "/usr/bin/vlc" if cmd == "vlc" else None
+    )
     assert isinstance(player.resolve("mpv"), player.VLCPlayer)
 
 
 def test_resolve_returns_the_request_when_nothing_is_installed(monkeypatch):
     """So the eventual error names the player the user actually chose."""
-    monkeypatch.setattr(player.shutil, "which", lambda _cmd: None)
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
     resolved = player.resolve("mpv")
     assert isinstance(resolved, player.MPVPlayer)
     try:
@@ -113,14 +123,14 @@ def test_resolve_returns_the_request_when_nothing_is_installed(monkeypatch):
 def test_resolve_never_substitutes_the_browser(monkeypatch):
     """The browser is per-channel only; it must not become a stream default."""
     monkeypatch.setattr(
-        player.shutil, "which", lambda cmd: "/usr/bin/xdg-open" if cmd == "xdg-open" else None
+        shutil, "which", lambda cmd: "/usr/bin/xdg-open" if cmd == "xdg-open" else None
     )
     assert not isinstance(player.resolve("vlc"), player.BrowserPlayer)
 
 
 def test_mpv_runs_without_a_terminal(monkeypatch):
     """Spawned detached with no tty, mpv must not try to drive one."""
-    monkeypatch.setattr(player.shutil, "which", lambda _cmd: "/usr/bin/mpv")
+    monkeypatch.setattr(shutil, "which", lambda _cmd: "/usr/bin/mpv")
     args = player.MPVPlayer().args("https://example.invalid/s")
     assert "--no-terminal" in args
     # The URL still goes last, where every player expects it.

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Milestones 1–7 are done: download → parse → browse → play, settings, search, favorites, recently-watched, a Now/Next guide from XMLTV, channel logos, light/dark themes, a settings window, an app icon, and multiple playlist providers with merging.
+Milestones 1–8 are done: download → parse → browse → play, settings, search, favorites, recently-watched, a Now/Next guide from XMLTV, channel logos, light/dark themes, a settings window, an app icon, and multiple playlist providers with merging.
 
 A `BrowserPlayer` backend and a "Web channels" playlist are how the Atresmedia and Mediaset channels appear.
 
@@ -101,6 +101,18 @@ Two things to know before changing it:
 
 Guide coverage is split: the seven Mediaset channels have XMLTV ids (`Telecinco.TV`, `Cuatro.TV`, `FDF.TV`, `Energy.TV`, `Divinity.TV`, `Boing.TV`, `Bemad.TV`) and show Now/Next; the six Atresmedia ones are absent from the TDTChannels EPG entirely and never will until that feed adds them.
 
+## Quality gates
+
+All three pass; keep them passing.
+
+- **ruff** — `line-length = 100`, rules `E,F,I,UP,B,SIM`. One deliberate `noqa`: `epg._open` returns an open handle by design (SIM115), because callers close it with `with`.
+- **mypy** — `strict`, over `src` *and* `tests`. Two overrides in `pyproject.toml`: Pillow ships no stubs, and tests relax `disallow_untyped_defs`/`incomplete_defs`/`untyped_calls` because annotating every fake adds noise without catching bugs. Everything else stays strict.
+  - `tests/` is a package (`tests/__init__.py`) purely so the mypy override can name `tests.*`; mypy rejects partial-component patterns like `test_*`.
+  - `logos.LogoSource` is a `Protocol` covering just `path_for`/`drain`. `ChannelBrowser` takes that rather than `LogoStore`, so test doubles satisfy it structurally instead of needing a cast.
+- **pytest** — 143 unit tests, plus 5 integration tests that are **off unless `ZAPTV_INTEGRATION=1`**. Those hit the live feeds and assert loose bounds (≥250 channels, ≥1000 programmes, playlist and guide still share tvg-ids, broadcaster pages still 200). They exist to catch the feed changing shape, which no unit test can. CI runs them weekly and on demand, never on a PR.
+
+Display-dependent tests skip rather than fail when there is no `DISPLAY`, so headless runs stay green; CI runs the suite twice, once under `xvfb-run` and once without, so the GUI tests cannot silently stop running.
+
 ## Packaging
 
 `packaging/` holds three routes, all verified to build and run here:
@@ -146,8 +158,20 @@ Two halves to it, worth keeping apart:
 
 ## Environment gotchas
 
-- **Python is 3.12.3, but `pyproject.toml` requires >=3.13** per `STACK.md`. `pip install -e .` will refuse, so run via `PYTHONPATH=src python3 -m zaptv`. The code avoids 3.13-only syntax.
-- **No `pip`, no `venv`** — `sudo apt install python3-venv`. Until then pytest/ruff/mypy cannot be installed and tests must be driven by a stdlib runner that shims `tmp_path` and `monkeypatch`.
+- **No `pip` and no `venv` on this machine** — `sudo apt install python3-venv` fixes it properly. Until then the toolchain can still be run without installing anything: ruff ships a standalone binary, and pytest and mypy publish pure-Python wheels that can be unzipped onto `PYTHONPATH`.
+
+  ```bash
+  # ruff: static binary from GitHub releases
+  curl -fsSL -o ruff.tar.gz \
+    https://github.com/astral-sh/ruff/releases/latest/download/ruff-x86_64-unknown-linux-gnu.tar.gz
+  # pytest: pytest, pluggy, iniconfig, packaging
+  # mypy:   mypy (1.x — 2.x needs the compiled librt), mypy_extensions,
+  #         typing_extensions, pathspec, tomli
+  # unzip each -py3-none-any.whl into one directory, then:
+  PYTHONPATH=<that dir>:src python3 -m pytest tests -q
+  ```
+
+  Run mypy **from the repository root** or it will not find `[tool.mypy]` in `pyproject.toml` and will exit with "Missing target module".
 - Tkinter **is** installed (Tk 8.6) and the session is Wayland with XWayland on `:0`, so the GUI runs.
 
 VLC is present at `/usr/bin/vlc`; mpv is not installed.

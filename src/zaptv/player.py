@@ -34,7 +34,7 @@ class Player(ABC):
     def args(self, stream_url: str) -> list[str]:
         """Full argument vector to spawn for this stream."""
 
-    def play(self, stream_url: str) -> subprocess.Popen:
+    def play(self, stream_url: str) -> subprocess.Popen[bytes] | None:
         """Spawn the player detached.
 
         Closing the player must not close ZapTV, and player chatter must not
@@ -81,7 +81,7 @@ class BrowserPlayer(Player):
     def args(self, page_url: str) -> list[str]:
         return [self.executable(), page_url]
 
-    def play(self, page_url: str) -> subprocess.Popen | None:
+    def play(self, page_url: str) -> subprocess.Popen[bytes] | None:
         """Hand the page to the desktop, falling back to Python's own opener."""
         if self.is_available():
             return super().play(page_url)

@@ -15,6 +15,7 @@ import hashlib
 import queue
 import threading
 from pathlib import Path
+from typing import Protocol
 
 from PIL import Image
 
@@ -71,6 +72,18 @@ def prepare(url: str, size: int = SIZE) -> Path | None:
         # Network error, redirect to HTML, truncated file, unsupported
         # format — all equally uninteresting, all equally "no logo".
         return None
+
+
+class LogoSource(Protocol):
+    """What the UI needs from a logo store.
+
+    Narrower than LogoStore on purpose: the UI only asks for a path and
+    collects finished downloads, so a test double needs nothing more.
+    """
+
+    def path_for(self, url: str | None) -> Path | None: ...
+
+    def drain(self) -> list[str]: ...
 
 
 class LogoStore:

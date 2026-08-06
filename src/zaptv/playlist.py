@@ -8,6 +8,7 @@ dependency for it would break the zero-dependency rule.
 """
 
 import re
+from pathlib import Path
 
 from .models import Channel
 
@@ -82,7 +83,7 @@ def parse(text: str, provider: str = "") -> list[Channel]:
     return [c for c in channels.values() if c.streams]
 
 
-def load(path, provider: str = "") -> list[Channel]:
+def load(path: Path, provider: str = "") -> list[Channel]:
     return parse(path.read_text(encoding="utf-8", errors="replace"), provider)
 
 

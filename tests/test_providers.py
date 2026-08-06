@@ -1,6 +1,6 @@
 import json
 
-from zaptv import providers
+from zaptv import providers, updater
 from zaptv.providers import Provider, ProviderList
 
 M3U = """#EXTM3U
@@ -68,7 +68,7 @@ def test_unreachable_remote_provider_resolves_to_none(monkeypatch, tmp_path):
     def explode(*_a, **_k):
         raise OSError("no network")
 
-    monkeypatch.setattr(providers.updater, "ensure", explode)
+    monkeypatch.setattr(updater, "ensure", explode)
     assert provider.resolve() is None
 
 
@@ -78,7 +78,8 @@ def test_unreachable_remote_provider_resolves_to_none(monkeypatch, tmp_path):
 def test_defaults_include_the_builtin(tmp_path):
     listing = ProviderList.load(tmp_path / "absent.json")
     assert len(listing) == 1
-    assert listing.get(providers.TDTCHANNELS_NAME).builtin
+    builtin = listing.get(providers.TDTCHANNELS_NAME)
+    assert builtin is not None and builtin.builtin
 
 
 def test_add_and_persist(tmp_path):
@@ -88,8 +89,10 @@ def test_add_and_persist(tmp_path):
 
     reloaded = ProviderList.load(path)
     assert [p.name for p in reloaded] == [providers.TDTCHANNELS_NAME, "Mine"]
-    assert reloaded.get("Mine").url == "https://x.invalid/m.m3u8"
-    assert not reloaded.get("Mine").builtin
+    mine = reloaded.get("Mine")
+    assert mine is not None
+    assert mine.url == "https://x.invalid/m.m3u8"
+    assert not mine.builtin
 
 
 def test_adding_an_existing_name_updates_it(tmp_path):
@@ -99,9 +102,11 @@ def test_adding_an_existing_name_updates_it(tmp_path):
     listing.add("Mine", "https://x.invalid/two.m3u8")
 
     assert len(listing) == 2
-    assert listing.get("Mine").url == "https://x.invalid/two.m3u8"
+    mine = listing.get("Mine")
+    assert mine is not None
+    assert mine.url == "https://x.invalid/two.m3u8"
     # Re-adding a disabled source turns it back on.
-    assert listing.get("Mine").enabled
+    assert mine.enabled
 
 
 def test_remove(tmp_path):
@@ -150,8 +155,9 @@ def test_a_file_missing_the_builtin_regains_it(tmp_path):
         json.dumps([{"name": "Only Mine", "url": "https://x.invalid/m"}]), encoding="utf-8"
     )
     listing = ProviderList.load(path)
-    assert listing.get(providers.TDTCHANNELS_NAME) is not None
-    assert listing.get(providers.TDTCHANNELS_NAME).builtin
+    builtin = listing.get(providers.TDTCHANNELS_NAME)
+    assert builtin is not None
+    assert builtin.builtin
 
 
 # -- loading channels ---------------------------------------------------
@@ -204,8 +210,8 @@ def test_legacy_cache_is_moved_once(tmp_path, monkeypatch):
     cache.mkdir()
     legacy = cache / "playlist.m3u"
     legacy.write_text(M3U, encoding="utf-8")
-    monkeypatch.setattr(providers.updater, "CACHE_DIR", cache)
-    monkeypatch.setattr(providers.updater, "PLAYLIST_PATH", legacy)
+    monkeypatch.setattr(updater, "CACHE_DIR", cache)
+    monkeypatch.setattr(updater, "PLAYLIST_PATH", legacy)
 
     providers.migrate_legacy_cache()
     target = cache / "playlists" / "tdtchannels.m3u"
@@ -223,8 +229,8 @@ def test_migration_leaves_an_existing_cache_alone(tmp_path, monkeypatch):
     legacy.write_text("legacy", encoding="utf-8")
     target = cache / "playlists" / "tdtchannels.m3u"
     target.write_text("current", encoding="utf-8")
-    monkeypatch.setattr(providers.updater, "CACHE_DIR", cache)
-    monkeypatch.setattr(providers.updater, "PLAYLIST_PATH", legacy)
+    monkeypatch.setattr(updater, "CACHE_DIR", cache)
+    monkeypatch.setattr(updater, "PLAYLIST_PATH", legacy)
 
     providers.migrate_legacy_cache()
     assert target.read_text(encoding="utf-8") == "current"

@@ -10,9 +10,10 @@ show a per-row image, and channel logos are the point of Milestone 4.
 """
 
 import tkinter as tk
+from collections.abc import Callable
 from pathlib import Path
-from tkinter import filedialog, font as tkfont
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import font as tkfont
 
 from . import epg as epg_module
 from . import logos as logos_module
@@ -167,7 +168,7 @@ class ProvidersWindow(tk.Toplevel):
         master: tk.Misc,
         sources: providers_module.ProviderList,
         palette: theme.Palette,
-        on_change,
+        on_change: Callable[[], None],
     ):
         super().__init__(master)
         self.title("ZapTV Playlists")
@@ -294,7 +295,13 @@ class ProvidersWindow(tk.Toplevel):
 class SettingsWindow(tk.Toplevel):
     """Player, updates, theme and logos, saved on OK."""
 
-    def __init__(self, master: tk.Misc, config: Settings, palette: theme.Palette, on_save):
+    def __init__(
+        self,
+        master: tk.Misc,
+        config: Settings,
+        palette: theme.Palette,
+        on_save: Callable[[Settings], None],
+    ):
         super().__init__(master)
         self.title("ZapTV Settings")
         self.resizable(False, False)
@@ -312,7 +319,9 @@ class SettingsWindow(tk.Toplevel):
         body = ttk.Frame(self, padding=12, style="Zap.TFrame")
         body.pack(fill=tk.BOTH, expand=True)
 
-        ttk.Label(body, text="Player", style="Zap.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 4))
+        ttk.Label(body, text="Player", style="Zap.TLabel").grid(
+            row=0, column=0, sticky="w", pady=(0, 4)
+        )
         for column, name in enumerate(SELECTABLE):
             # Offer every backend but say which are actually installed, rather
             # than hiding the choice and leaving the user guessing.
@@ -330,7 +339,9 @@ class SettingsWindow(tk.Toplevel):
             row=2, column=0, columnspan=2, sticky="ew", pady=10
         )
 
-        ttk.Label(body, text="Appearance", style="Zap.TLabel").grid(row=3, column=0, sticky="w", pady=(0, 4))
+        ttk.Label(body, text="Appearance", style="Zap.TLabel").grid(
+            row=3, column=0, sticky="w", pady=(0, 4)
+        )
         for column, name in enumerate(("light", "dark")):
             ttk.Radiobutton(
                 body, text=name, value=name, variable=self.theme_name,
@@ -351,8 +362,12 @@ class SettingsWindow(tk.Toplevel):
 
         buttons = ttk.Frame(body, style="Zap.TFrame")
         buttons.grid(row=7, column=0, columnspan=2, sticky="e", pady=(14, 0))
-        ttk.Button(buttons, text="Cancel", command=self.destroy, style="Zap.TButton").pack(side=tk.RIGHT, padx=(6, 0))
-        ttk.Button(buttons, text="Save", command=self._save, style="Zap.TButton").pack(side=tk.RIGHT)
+        ttk.Button(
+            buttons, text="Cancel", command=self.destroy, style="Zap.TButton"
+        ).pack(side=tk.RIGHT, padx=(6, 0))
+        ttk.Button(buttons, text="Save", command=self._save, style="Zap.TButton").pack(
+            side=tk.RIGHT
+        )
 
         self.bind("<Escape>", lambda _e: self.destroy())
         self.bind("<Return>", lambda _e: self._save())
@@ -377,7 +392,7 @@ class ChannelBrowser(tk.Frame):
         recent: Recent,
         guide: epg_module.Guide | None = None,
         config: Settings | None = None,
-        logo_store: logos_module.LogoStore | None = None,
+        logo_store: logos_module.LogoSource | None = None,
         sources: providers_module.ProviderList | None = None,
     ):
         super().__init__(master)
@@ -641,7 +656,7 @@ class ChannelBrowser(tk.Frame):
         self._play(channel, self._player_for(channel))
         return "break"
 
-    def _on_context_menu(self, event: object) -> str:
+    def _on_context_menu(self, event: "tk.Event[ttk.Treeview]") -> str:
         """Offer the other players for this one channel."""
         row = self.tree.identify_row(event.y)
         if row not in self._rows:
@@ -667,13 +682,21 @@ class ChannelBrowser(tk.Frame):
             menu.add_command(
                 label=label if backend.is_available() else f"{label} (not installed)",
                 state=tk.NORMAL if backend.is_available() else tk.DISABLED,
-                command=lambda n=name, c=channel: self._play(c, get_player(n)),
+                command=self._play_command(channel, name),
             )
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
         return "break"
+
+    def _play_command(self, channel: Channel, player_name: str) -> Callable[[], None]:
+        """Bind a menu entry to one channel and one player."""
+
+        def command() -> None:
+            self._play(channel, get_player(player_name))
+
+        return command
 
     def _play(self, channel: Channel, player: Player) -> None:
         """Hand a channel to a player and record that it was watched."""
@@ -726,14 +749,14 @@ class ChannelBrowser(tk.Frame):
         ProvidersWindow(self, self._sources, self._palette, self._reload_channels)
         return "break"
 
-    def _reload_channels(self, force: bool = False) -> str:
+    def _reload_channels(self, force: bool = False) -> None:
         """Re-read channels from the configured providers.
 
         Keeps the current list when every source fails, so a dropped network
         never empties the window.
         """
         if self._sources is None:
-            return "break"
+            return
 
         self.status.config(text="Loading playlists…")
         self.update_idletasks()
@@ -746,7 +769,6 @@ class ChannelBrowser(tk.Frame):
         if failed:
             self.status.config(text=f"Unavailable: {', '.join(failed)}")
             self.update_idletasks()
-        return "break"
 
     def reload(self, _event: object = None) -> str:
         """Force a refresh of every playlist and the guide."""

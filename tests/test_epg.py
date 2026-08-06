@@ -61,6 +61,7 @@ def test_bad_offset_falls_back_to_utc():
 
 def test_parses_fields():
     programme, _ = guide().now_and_next("La1.TV", at(5, 30))
+    assert programme is not None
     assert programme.title == "Telediario Matinal"
     assert programme.description == "Las noticias de la mañana."
     assert programme.category == "NEWS"
@@ -86,18 +87,21 @@ def test_programmes_without_a_start_are_skipped():
 
 def test_now_and_next():
     current, following = guide().now_and_next("La1.TV", at(5, 30))
+    assert current is not None and following is not None
     assert current.title == "Telediario Matinal"
     assert following.title == "La hora de La 1"
 
 
 def test_start_boundary_is_inclusive():
     current, _ = guide().now_and_next("La1.TV", at(6, 30))
+    assert current is not None
     assert current.title == "La hora de La 1"
 
 
 def test_gap_before_the_schedule_has_no_current_programme():
     current, following = guide().now_and_next("La1.TV", at(4))
     assert current is None
+    assert following is not None
     assert following.title == "Telediario Matinal"
 
 
@@ -122,12 +126,14 @@ def test_gap_between_programmes_has_no_current():
     }
     current, following = epg.Guide(programmes).now_and_next("X", at(7))
     assert current is None
+    assert following is not None
     assert following.title == "B"
 
 
 def test_programme_without_an_end_stays_live():
     programmes = {"X": [Programme("X", "Open ended", at(5), None)]}
     current, _ = epg.Guide(programmes).now_and_next("X", at(23))
+    assert current is not None
     assert current.title == "Open ended"
 
 
@@ -139,6 +145,7 @@ def test_programmes_are_sorted_regardless_of_input_order():
         ]
     }
     current, following = epg.Guide(programmes).now_and_next("X", at(5, 30))
+    assert current is not None and following is not None
     assert (current.title, following.title) == ("First", "Second")
 
 

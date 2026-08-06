@@ -3,6 +3,7 @@
 import sys
 
 from . import epg, providers, search, updater, webchannels
+from .models import Channel
 from .settings import Settings
 from .storage import Favorites, Recent
 
@@ -51,7 +52,10 @@ def main(argv: list[str] | None = None) -> int:
 
     if "--list" in argv or "--search" in argv:
         favorites = Favorites.load()
-        for channel in sorted(channels, key=lambda c: (search.normalize(c.group), search.sort_key(c))):
+        def group_then_name(channel: Channel) -> tuple[str, tuple[str, str]]:
+            return (search.normalize(channel.group), search.sort_key(channel))
+
+        for channel in sorted(channels, key=group_then_name):
             marker = "*" if channel.name in favorites else " "
             print(
                 f"{marker}\t{channel.provider}\t{channel.group}\t{channel.name}\t{channel.stream}"
@@ -106,7 +110,7 @@ def _load_guide(config: Settings) -> epg.Guide:
     return epg.load(path)
 
 
-def _print_now(channels: list, config: Settings) -> int:
+def _print_now(channels: list[Channel], config: Settings) -> int:
     """Print Now/Next per channel — the guide equivalent of --list."""
     guide = _load_guide(config)
     if not len(guide):

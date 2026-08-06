@@ -13,20 +13,25 @@ import xml.etree.ElementTree as ET
 from bisect import bisect_right
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import IO, cast
 
 from .models import Programme
 
 _GZIP_MAGIC = b"\x1f\x8b"
 
 
-def _open(path: Path):
+def _open(path: Path) -> IO[bytes]:
     """Open the guide whether or not it is gzipped.
 
     The cache file is .gz, but a hand-supplied plain XML file should work too.
     """
     with open(path, "rb") as probe:
         gzipped = probe.read(2) == _GZIP_MAGIC
-    return gzip.open(path, "rb") if gzipped else open(path, "rb")
+    # Returning an open handle is the point: callers close it with `with`.
+    handle = gzip.open(path, "rb") if gzipped else open(path, "rb")  # noqa: SIM115
+    # GzipFile implements the binary IO protocol; typeshed just does not
+    # declare it as IO[bytes].
+    return cast(IO[bytes], handle)
 
 
 def parse_timestamp(value: str) -> datetime | None:
@@ -118,7 +123,7 @@ class Guide:
         return self._by_channel[channel][index : index + limit]
 
 
-def parse(source) -> Guide:
+def parse(source: IO[bytes] | IO[str] | str | Path) -> Guide:
     """Build a Guide from an XMLTV file object or path.
 
     Programmes missing a channel, title or start time are skipped: they cannot

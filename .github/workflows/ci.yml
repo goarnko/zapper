@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly, to notice the upstream feeds changing shape before a user does.
+    - cron: "0 6 * * 1"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # The floor and a current release. requires-python is >=3.10.
+        python-version: ["3.10", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Tk and a virtual display
+        # The GUI tests need a real Tk and an X server; without them they
+        # skip, and a suite that silently skips its UI is not a suite.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-tk xvfb
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check src tests
+
+      - name: Type check
+        run: mypy
+
+      - name: Test
+        # xvfb-run gives the Tk tests a display, so they run rather than skip.
+        run: xvfb-run -a python -m pytest tests -q
+
+      - name: Test headless
+        # And once without a display, to prove the skips still work.
+        run: python -m pytest tests -q
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fakeroot desktop-file-utils
+          python -m pip install --upgrade pip pillow
+
+      - name: Validate desktop entry
+        run: desktop-file-validate packaging/zaptv.desktop
+
+      - name: Build .deb
+        run: packaging/build-deb.sh
+
+      - name: Check the package installs and runs
+        run: |
+          sudo apt-get install -y ./dist/zaptv_*_all.deb
+          zaptv --version
+          zaptv --players
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zaptv-deb
+          path: dist/*.deb
+
+  integration:
+    # Hits the live TDTChannels feeds, so only on demand and on the weekly
+    # schedule: a broadcaster having a bad afternoon must not fail a PR.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Integration tests
+        env:
+          ZAPTV_INTEGRATION: "1"
+        run: python -m pytest tests/test_integration.py -q

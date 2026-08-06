@@ -256,6 +256,21 @@ Project maturity.
 - Type checking
 - Linting
 
+Status: done.
+
+143 unit tests, plus integration tests against the live feeds that are
+off unless ZAPTV_INTEGRATION=1 -- they exist to catch upstream changing
+shape, and CI runs them weekly rather than on every pull request.
+
+ruff and mypy had been configured since Milestone 1 but never actually
+run, because this machine has no pip. Running them found 10 lint issues
+and 19 strict-mode type errors in src, all fixed; mypy is now clean over
+src and tests both.
+
+CI runs lint, types and the suite on Python 3.10 and 3.13, once under
+xvfb and once headless so the GUI tests cannot silently stop running,
+and separately builds the .deb and installs it.
+
 Deliverable
 
 ```

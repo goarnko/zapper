@@ -38,5 +38,18 @@ python_version = "3.10"
 files = ["src", "tests"]
 strict = true
 
+# Pillow ships no type information.
+[[tool.mypy.overrides]]
+module = ["PIL.*"]
+ignore_missing_imports = true
+
+# Tests are checked, but annotating every fixture and fake adds noise
+# without catching bugs; the strict rules that matter still apply.
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

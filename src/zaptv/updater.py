@@ -37,7 +37,8 @@ def fetch(url: str, timeout: int = _TIMEOUT) -> bytes:
     """GET a URL and return the body."""
     request = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT})
     with urllib.request.urlopen(request, timeout=timeout) as response:
-        return response.read()
+        body: bytes = response.read()
+    return body
 
 
 def download(path: Path = PLAYLIST_PATH, url: str = PLAYLIST_URL) -> Path:
