@@ -102,6 +102,16 @@ watch, and the file is yours to edit or remove.
 The seven Mediaset channels also show Now/Next; the Atresmedia ones have no guide data
 because the TDTChannels EPG does not carry them.
 
+## Updates
+
+ZapTV checks once a day whether a newer release exists and mentions it in the status bar.
+It only ever reports — nothing is downloaded or replaced. Turn it off in settings
+(`Ctrl+,`), or check on demand:
+
+```bash
+zaptv --check-updates
+```
+
 ## Development
 
 ```bash

@@ -9,16 +9,18 @@ The list is a ttk.Treeview rather than a Listbox because only Treeview can
 show a per-row image, and channel logos are the point of Milestone 4.
 """
 
+import queue
 import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter import font as tkfont
 
+from . import __version__, search, theme, updater
 from . import epg as epg_module
 from . import logos as logos_module
 from . import providers as providers_module
-from . import search, theme, updater
+from . import updates as updates_module
 from .models import Channel, Programme
 from .player import PLAYERS, SELECTABLE, Player, PlayerNotFound, get_player, resolve
 from .settings import Settings
@@ -34,6 +36,8 @@ NO_GUIDE_TEXT = "No guide data for this channel"
 GUIDE_TICK_MS = 60_000
 #: How often newly downloaded logos are collected onto rows.
 LOGO_TICK_MS = 400
+#: How often the background update check is polled for its answer.
+UPDATE_TICK_MS = 1000
 #: Descriptions run to several hundred characters; the pane shows three lines.
 DESCRIPTION_LIMIT = 165
 
@@ -315,6 +319,7 @@ class SettingsWindow(tk.Toplevel):
         self.auto_update = tk.BooleanVar(value=config.auto_update)
         self.theme_name = tk.StringVar(value=config.theme)
         self.show_logos = tk.BooleanVar(value=config.show_logos)
+        self.check_updates = tk.BooleanVar(value=config.check_updates)
 
         body = ttk.Frame(self, padding=12, style="Zap.TFrame")
         body.pack(fill=tk.BOTH, expand=True)
@@ -359,9 +364,15 @@ class SettingsWindow(tk.Toplevel):
             variable=self.auto_update,
             style="Zap.TCheckbutton",
         ).grid(row=6, column=0, columnspan=2, sticky="w")
+        ttk.Checkbutton(
+            body,
+            text="Tell me when a new ZapTV is released",
+            variable=self.check_updates,
+            style="Zap.TCheckbutton",
+        ).grid(row=7, column=0, columnspan=2, sticky="w")
 
         buttons = ttk.Frame(body, style="Zap.TFrame")
-        buttons.grid(row=7, column=0, columnspan=2, sticky="e", pady=(14, 0))
+        buttons.grid(row=8, column=0, columnspan=2, sticky="e", pady=(14, 0))
         ttk.Button(
             buttons, text="Cancel", command=self.destroy, style="Zap.TButton"
         ).pack(side=tk.RIGHT, padx=(6, 0))
@@ -377,6 +388,7 @@ class SettingsWindow(tk.Toplevel):
         self._config.auto_update = bool(self.auto_update.get())
         self._config.theme = self.theme_name.get()
         self._config.show_logos = bool(self.show_logos.get())
+        self._config.check_updates = bool(self.check_updates.get())
         self._config.save()
         self._on_save(self._config)
         self.destroy()
@@ -409,6 +421,8 @@ class ChannelBrowser(tk.Frame):
         # Tk images must be built on the main thread and kept referenced, or
         # they are garbage collected straight off the rows.
         self._images: dict[str, tk.PhotoImage] = {}
+
+        self._updates: queue.Queue[updates_module.Release | None] | None = None
 
         #: Treeview row id -> channel. Headers are absent, which is what makes
         #: them unselectable.
@@ -463,6 +477,9 @@ class ChannelBrowser(tk.Frame):
 
         # Whichever programme is "now" changes without any user action.
         self.after(GUIDE_TICK_MS, self._tick_guide)
+        if self._config.check_updates:
+            self._updates = updates_module.check_async(__version__)
+            self.after(UPDATE_TICK_MS, self._tick_updates)
         if self._logos is not None:
             self.after(LOGO_TICK_MS, self._tick_logos)
 
@@ -638,6 +655,26 @@ class ChannelBrowser(tk.Frame):
     def _tick_guide(self) -> None:
         self._update_guide()
         self.after(GUIDE_TICK_MS, self._tick_guide)
+
+    # -- updates ---------------------------------------------------------
+
+    def _tick_updates(self) -> None:
+        """Report a newer release once, in the status bar.
+
+        Deliberately quiet: no dialog, nothing to dismiss. Someone opening
+        the app wants to watch television, not to be interrupted.
+        """
+        if self._updates is None:
+            return
+        try:
+            release = self._updates.get_nowait()
+        except queue.Empty:
+            self.after(UPDATE_TICK_MS, self._tick_updates)
+            return
+
+        self._updates = None
+        if release is not None:
+            self.status.config(text=f"ZapTV {release.version} is available — {release.url}")
 
     # -- selection -------------------------------------------------------
 

@@ -2,7 +2,7 @@
 
 import sys
 
-from . import epg, providers, search, updater, webchannels
+from . import epg, providers, search, updater, updates, webchannels
 from .models import Channel
 from .settings import Settings
 from .storage import Favorites, Recent
@@ -33,6 +33,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if "--players" in argv:
         return _print_players()
+
+    if "--check-updates" in argv:
+        return _print_update_check()
 
     channels, failed = sources.load_channels(refresh=config.auto_update)
     for name in failed:
@@ -73,6 +76,19 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     ui.run(channels, config, Favorites.load(), Recent.load(), _load_guide(config), sources)
+    return 0
+
+
+def _print_update_check() -> int:
+    """Report whether a newer release exists. Checks only; updates nothing."""
+    from . import __version__
+
+    release = updates.check(__version__)
+    if release is None:
+        print(f"ZapTV {__version__} — no newer release found.")
+        return 0
+    print(f"ZapTV {release.version} is available (you have {__version__})")
+    print(release.url)
     return 0
 
 

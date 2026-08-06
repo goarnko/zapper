@@ -24,6 +24,9 @@ class Settings:
     auto_update: bool = True
     theme: str = "light"
     show_logos: bool = True
+    #: Ask GitHub, at most daily, whether a newer ZapTV was released. This
+    #: only reports; nothing is downloaded or replaced.
+    check_updates: bool = True
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Settings":

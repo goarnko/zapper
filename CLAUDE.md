@@ -10,7 +10,7 @@ A `BrowserPlayer` backend and a "Web channels" playlist are how the Atresmedia a
 
 Much of Milestone 6 was already delivered incrementally — the VLC and mpv backends, selection in the settings window, and `is_available` detection all predate it. What it added was **resolution** (`player.resolve`), a per-channel *Play with…* menu, and `--players`.
 
-**Not** done: Pluto TV is not bundled as a named provider (Milestone 5) — addable by URL, but no built-in entry. Application self-update (Milestone 7) is deferred: it needs a release channel, and the repo has no GitHub releases yet.
+**Not** done: Pluto TV is not bundled as a named provider (Milestone 5) — addable by URL, but no built-in entry. Milestone 7's "automatic updates" ships as a **check only** (`updates.py`): it reports a newer release, it does not download or replace anything, because a `.deb` updates through apt and an AppImage by replacing the file.
 
 Note the git repo is named `zapper` but the project is **ZapTV** (`zaptv`) — the rename happened after the repo was created.
 
@@ -115,6 +115,19 @@ All three pass; keep them passing.
 **Tests must not depend on what is installed.** Anything touching a player patches `shutil.which` rather than assuming VLC or `xdg-open` exists — CI runners have neither. To check, run the suite with `shutil.which` stubbed to return `None` for `vlc`, `mpv` and `xdg-open`.
 
 Display-dependent tests skip rather than fail when there is no `DISPLAY`, so headless runs stay green; CI runs the suite twice, once under `xvfb-run` and once without, so the GUI tests cannot silently stop running.
+
+## Update check
+
+`updates.py` asks the GitHub releases API whether a newer tag exists. It **checks and reports; it never updates**. Deliberate properties:
+
+- **Every failure is silent.** No network, an outage, a rate limit, or the repo being private all produce `None` and no message. A version check is the least important thing the app does and must never interrupt watching TV.
+- **Cached for 24h** in `~/.local/share/zaptv/update-check.json`, so launching repeatedly is not a request to GitHub each time.
+- **Runs on a daemon thread** and reports through a queue the UI polls, so startup never waits on GitHub and quitting is never blocked by a hung request.
+- **Reported in the status bar, once.** No dialog, nothing to dismiss.
+- Controlled by `Settings.check_updates` (default on), toggleable in the settings window. `--check-updates` runs it from the CLI.
+- An unparseable or lower tag is never "newer", so a malformed release cannot nag users.
+
+**The repository is public**, which this feature needs: the unauthenticated releases API returns 404 for a private repo, so the check silently did nothing until the visibility changed. `gh api` masked this during development because it authenticates as the user.
 
 ## Packaging
 
