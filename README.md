@@ -24,7 +24,7 @@ PYTHONPATH=src python3 -m zaptv           # open the channel list
 PYTHONPATH=src python3 -m zaptv --list    # print channels as TSV instead
 ```
 
-Add `--search <query>` to filter the TSV output.
+Add `--search <query>` to filter the TSV output, or `--now` to print what is on air.
 
 ## Keyboard
 
@@ -39,13 +39,19 @@ Add `--search <query>` to filter the TSV output.
 
 Search ignores accents, so `malaga` finds *101TV Málaga*. Favorites and recently watched channels appear at the top of the list.
 
+## TV guide
+
+Selecting a channel shows what is on now and what is next, from the TDTChannels XMLTV feed.
+
+Guide data covers about a quarter of the channel list — the playlist rarely carries the `tvg-id` needed to match a channel to the guide — so many channels simply show *No guide data for this channel*.
+
 ## Files
 
 The playlist is cached in `~/.local/share/zaptv/` and refreshed automatically when it is more than 24 hours old. Settings, favorites and recents live in `~/.config/zaptv/`.
 
 ## Status
 
-Milestone 2 — browse, search, favorites, recents. EPG and channel logos are planned.
+Milestone 3 — browse, search, favorites, recents, Now/Next guide. Channel logos and further polish are planned.
 
 - [SPEC.md](SPEC.md) — what the app is and is not
 - [STACK.md](STACK.md) — technology decisions

@@ -6,6 +6,7 @@ playlist lists the same channel several times, once per mirror, so each
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 
 
 @dataclass
@@ -21,3 +22,25 @@ class Channel:
     def stream(self) -> str:
         """Preferred stream. Mirrors are ordered as the playlist listed them."""
         return self.streams[0]
+
+
+@dataclass
+class Programme:
+    """One entry from the XMLTV guide.
+
+    `channel` is the XMLTV channel id, which is what `Channel.tvg_id` holds
+    when the playlist bothered to supply one. `end` is optional: XMLTV allows
+    a programme with no stop time, which then runs until the next one starts.
+    """
+
+    channel: str
+    title: str
+    start: datetime
+    end: datetime | None = None
+    description: str = ""
+    category: str = ""
+
+    def is_live(self, at: datetime) -> bool:
+        if at < self.start:
+            return False
+        return self.end is None or at < self.end

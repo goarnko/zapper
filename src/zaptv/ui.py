@@ -6,10 +6,13 @@ without scrolling past several hundred others.
 """
 
 import tkinter as tk
+from datetime import datetime, timezone
+from tkinter import font as tkfont
 from tkinter import messagebox
 
+from . import epg as epg_module
 from . import playlist, search, updater
-from .models import Channel
+from .models import Channel, Programme
 from .player import Player, PlayerNotFound, get_player
 from .settings import Settings
 from .storage import Favorites, Recent
@@ -20,6 +23,73 @@ _STAR = "★"
 FAVORITES_LABEL = "★ FAVORITES"
 RECENT_LABEL = "RECENT"
 
+NO_GUIDE_TEXT = "No guide data for this channel"
+#: How often the Now/Next pane re-evaluates which programme is on air.
+GUIDE_TICK_MS = 60_000
+
+
+#: Descriptions run to several hundred characters; the pane shows three lines.
+DESCRIPTION_LIMIT = 165
+
+
+def format_slot(programme: Programme | None) -> str:
+    """One line for a programme, in the viewer's local time."""
+    if programme is None:
+        return "—"
+    local = programme.start.astimezone()
+    return f"{local:%H:%M}  {programme.title}"
+
+
+def clip(text: str, limit: int = DESCRIPTION_LIMIT) -> str:
+    """Trim to a whole word and mark the cut, rather than stopping mid-word."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0].rstrip(",.;:")
+    return f"{cut}…"
+
+
+class GuidePane(tk.Frame):
+    """Now / Next for the selected channel.
+
+    Most channels have no guide data at all — the playlist carries far more
+    channels than the XMLTV feed covers — so "no guide" is a normal state
+    here, rendered quietly rather than as an error.
+    """
+
+    def __init__(self, master: tk.Misc):
+        super().__init__(master)
+        bold = tkfont.nametofont("TkDefaultFont").copy()
+        bold.configure(weight="bold")
+
+        self.channel_label = tk.Label(self, anchor="w", font=bold)
+        self.now_label = tk.Label(self, anchor="w")
+        self.next_label = tk.Label(self, anchor="w", fg=_HEADER_FG)
+        self.description = tk.Label(
+            self, anchor="nw", justify=tk.LEFT, fg=_HEADER_FG, wraplength=390, height=3
+        )
+        for widget in (self.channel_label, self.now_label, self.next_label, self.description):
+            widget.pack(fill=tk.X)
+
+    def show(self, channel: Channel | None, current: Programme | None, following: Programme | None):
+        if channel is None:
+            self.channel_label.config(text="")
+            self.now_label.config(text="")
+            self.next_label.config(text="")
+            self.description.config(text="")
+            return
+
+        self.channel_label.config(text=channel.name)
+        if current is None and following is None:
+            self.now_label.config(text=NO_GUIDE_TEXT)
+            self.next_label.config(text="")
+            self.description.config(text="")
+            return
+
+        self.now_label.config(text=f"Now   {format_slot(current)}")
+        self.next_label.config(text=f"Next  {format_slot(following)}")
+        self.description.config(text=clip(current.description) if current else "")
+
 
 class ChannelBrowser(tk.Frame):
     def __init__(
@@ -29,12 +99,14 @@ class ChannelBrowser(tk.Frame):
         player: Player,
         favorites: Favorites,
         recent: Recent,
+        guide: epg_module.Guide | None = None,
     ):
         super().__init__(master)
         self._channels = channels
         self._player = player
         self._favorites = favorites
         self._recent = recent
+        self._guide = guide or epg_module.Guide()
         # Index-aligned with the listbox; None marks a section header or spacer.
         self._rows: list[Channel | None] = []
 
@@ -66,6 +138,9 @@ class ChannelBrowser(tk.Frame):
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        self.guide_pane = GuidePane(self)
+        self.guide_pane.pack(fill=tk.X, pady=(6, 0))
+
         self.status = tk.Label(self, anchor="w", fg=_HEADER_FG)
         self.status.pack(fill=tk.X, pady=(6, 0))
 
@@ -75,8 +150,26 @@ class ChannelBrowser(tk.Frame):
         # the search box it has to stay an ordinary character.
         self.listbox.bind("<KeyPress-f>", self._on_toggle_favorite)
         self.listbox.bind("<KeyPress-F>", self._on_toggle_favorite)
+        self.listbox.bind("<<ListboxSelect>>", lambda _e: self._update_guide())
         entry.bind("<Return>", self._on_search_return)
         entry.bind("<Down>", self._focus_list)
+
+        # Whichever programme is "now" changes without any user action.
+        self.after(GUIDE_TICK_MS, self._tick_guide)
+
+    # -- guide -----------------------------------------------------------
+
+    def _update_guide(self) -> None:
+        channel = self.selected()
+        if channel is None:
+            self.guide_pane.show(None, None, None)
+            return
+        current, following = self._guide.now_and_next(channel.tvg_id)
+        self.guide_pane.show(channel, current, following)
+
+    def _tick_guide(self) -> None:
+        self._update_guide()
+        self.after(GUIDE_TICK_MS, self._tick_guide)
 
     # -- list building ---------------------------------------------------
 
@@ -107,6 +200,8 @@ class ChannelBrowser(tk.Frame):
 
         self._update_status(len(visible))
         self._restore_selection(previous)
+        # Selecting from code does not fire <<ListboxSelect>>.
+        self._update_guide()
 
     def _add_section(self, label: str, channels: list[Channel]) -> None:
         if self._rows:
@@ -212,7 +307,7 @@ class ChannelBrowser(tk.Frame):
         return "break"
 
     def reload(self, _event: object = None) -> str:
-        """Force a playlist download, keeping the old list if it fails."""
+        """Force a playlist and guide download, keeping the old data if it fails."""
         self.status.config(text="Updating…")
         self.update_idletasks()
         try:
@@ -225,6 +320,15 @@ class ChannelBrowser(tk.Frame):
 
         if channels:
             self._channels = channels
+
+        # The guide is optional: a failure here should not spoil a successful
+        # playlist refresh, so it is reported only in the status line.
+        try:
+            self._guide = epg_module.load(updater.download_epg())
+        except OSError:
+            self.status.config(text="Channel list updated; guide unavailable")
+            self.update_idletasks()
+
         self._refresh()
         return "break"
 
@@ -234,12 +338,13 @@ def run(
     config: Settings | None = None,
     favorites: Favorites | None = None,
     recent: Recent | None = None,
+    guide: epg_module.Guide | None = None,
 ) -> None:
     config = config or Settings.load()
 
     root = tk.Tk()
     root.title("ZapTV")
-    root.geometry("420x640")
+    root.geometry("420x760")
 
     browser = ChannelBrowser(
         root,
@@ -247,6 +352,7 @@ def run(
         get_player(config.player),
         favorites or Favorites.load(),
         recent or Recent.load(),
+        guide,
     )
     browser.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Milestones 1–2 are done: download → parse → browse → play, plus settings, search with instant filtering, favorites, and recently-watched. EPG and channel logos (Milestone 3) are not implemented.
+Milestones 1–3 are done: download → parse → browse → play, settings, search with instant filtering, favorites, recently-watched, and a Now/Next guide from XMLTV. Channel logos and the rest of Milestone 4 (polish) are not implemented.
 
 Note the git repo is named `zapper` but the project is **ZapTV** (`zaptv`) — the rename happened after the repo was created.
 
@@ -22,6 +22,7 @@ Three specs, and they do not fully agree — `STACK.md` and `ROADMAP.md` are new
 PYTHONPATH=src python3 -m zaptv                    # run the GUI
 PYTHONPATH=src python3 -m zaptv --list             # channels as TSV (no GUI needed)
 PYTHONPATH=src python3 -m zaptv --search malaga    # same, filtered
+PYTHONPATH=src python3 -m zaptv --now              # Now/Next per channel
 python3 -m pytest tests -q                         # tests
 python3 -m ruff check src tests                    # lint
 python3 -m mypy                                    # type check (config in pyproject)
@@ -56,7 +57,7 @@ Shortcuts follow `SPEC.md`: Enter plays, `Ctrl+F` focuses search, `F` favorites,
 
 XDG-split, and both honor their env vars:
 
-- Cache (disposable): `~/.local/share/zaptv/` — `playlist.m3u`, later `epg.xml.gz`, `logos/`. Refreshed when >24h old.
+- Cache (disposable): `~/.local/share/zaptv/` — `playlist.m3u`, `epg.xml.gz`, later `logos/`. Refreshed when >24h old.
 - Config (user intent): `~/.config/zaptv/` — `settings.json`, `favorites.json`, `recent.json`.
 
 Favorites and recents are keyed by **channel name**, not `(name, group)`, matching the flat JSON list in `SPEC.md`. That keeps a favorite alive when a channel changes group in an updated playlist; the cost is that two channels sharing a name across groups are favorited together. All three JSON files fall back to defaults rather than raising when corrupt — a bad config file must never stop playback.
@@ -71,6 +72,14 @@ Verified against the live TDTChannels list — these shaped the parser and will 
 - Groups are regional/thematic Spanish labels (`Generalistas`, `Andalucía`, `Musicales`, …), ~30 of them.
 
 `tests/test_playlist.py` pins each of these.
+
+## What the real guide looks like
+
+The XMLTV feed is well-formed — all timestamps 14-digit and `+0000`, no missing stop times or titles, ~11k programmes over ~3.5 days, 52 ms to parse — so the parser's tolerance is about surviving a bad *download*, not bad data.
+
+The coverage gap is the thing to design around: **only 126 of 471 channels have guide data** (~27%). The playlist mostly lacks `tvg-id`, which is the only join key. So "no guide" is the *majority* case and is rendered as a quiet line in the pane, never an error. Every `Guide` lookup returns `None`/empty rather than raising, and a missing or corrupt cache yields an empty `Guide`.
+
+61 XMLTV channel ids have programmes but no playlist channel — Atresmedia and Mediaset (`Cuatro.TV`, `Telecinco.TV`, `Bemad.TV`, …) among them. They have guide data but no stream, because those broadcasters gate live playback behind their own platforms. Adding them to the list would need a different playback mechanism, not a playlist fix.
 
 ## Environment gotchas
 
