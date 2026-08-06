@@ -148,11 +148,14 @@ gate live playback behind their own platforms (Atresplayer, Mitele). The
 XMLTV guide *does* carry them, so they already appear as programme data
 with no stream to play.
 
-This milestone supplies the plumbing, and it is now built: pointing ZapTV
-at a list that carries working URLs for them works end to end (add it
-with Ctrl+P, by URL or local file). If no such list exists, they instead
-need a player that can open the broadcaster's web player — see
-Milestone 6.
+Resolved. Both halves are built:
+
+The plumbing works — pointing ZapTV at a list carrying working URLs for
+them is enough (add it with Ctrl+P, by URL or local file).
+
+And because no such list is reliably maintained, ZapTV also ships a
+"Web channels" playlist that opens the broadcaster's official live page
+in a browser. See webchannels.py and the BrowserPlayer backend.
 
 Deliverable
 
@@ -175,9 +178,11 @@ Player independence.
 - Player selection
 - Player detection
 
-A browser backend belongs here too, if the Atresmedia and Mediaset
-channels noted under Milestone 5 turn out to need one: opening the
-broadcaster's web player is a player choice, not a playlist source.
+The browser backend is already built, ahead of this milestone, because
+the Atresmedia and Mediaset channels needed it: opening the broadcaster's
+web player is a player choice, not a playlist source. See BrowserPlayer
+and the per-channel zaptv-player attribute. What remains here is player
+selection and detection for the ordinary stream backends.
 
 Deliverable
 

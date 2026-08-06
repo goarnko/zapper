@@ -20,6 +20,10 @@ class Channel:
     #: Name of the provider this channel came from. When the same channel is
     #: offered by several sources, this is the first one that supplied it.
     provider: str = ""
+    #: Player to use for this channel, overriding the configured default.
+    #: Set from the playlist's zaptv-player attribute; "browser" marks a
+    #: channel whose stream is a web page rather than a media stream.
+    player: str = ""
 
     @property
     def stream(self) -> str:

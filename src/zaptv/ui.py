@@ -19,7 +19,7 @@ from . import logos as logos_module
 from . import providers as providers_module
 from . import search, theme, updater
 from .models import Channel, Programme
-from .player import PLAYERS, Player, PlayerNotFound, get_player
+from .player import SELECTABLE, Player, PlayerNotFound, get_player
 from .settings import Settings
 from .storage import Favorites, Recent
 
@@ -313,7 +313,7 @@ class SettingsWindow(tk.Toplevel):
         body.pack(fill=tk.BOTH, expand=True)
 
         ttk.Label(body, text="Player", style="Zap.TLabel").grid(row=0, column=0, sticky="w", pady=(0, 4))
-        for column, name in enumerate(sorted(PLAYERS)):
+        for column, name in enumerate(SELECTABLE):
             # Offer every backend but say which are actually installed, rather
             # than hiding the choice and leaving the user guessing.
             available = get_player(name).is_available()
@@ -638,13 +638,23 @@ class ChannelBrowser(tk.Frame):
         if channel is None:
             return "break"
         try:
-            self._player.play(channel.stream)
+            self._player_for(channel).play(channel.stream)
         except PlayerNotFound as exc:
             messagebox.showerror("Player not found", str(exc), parent=self)
             return "break"
         self._recent.push(channel.name)
         self._refresh()
         return "break"
+
+    def _player_for(self, channel: Channel) -> Player:
+        """The channel's own player when it names one, else the default.
+
+        Web channels carry a page URL rather than a stream, so they must
+        open in a browser however the user configured VLC or mpv.
+        """
+        if channel.player:
+            return get_player(channel.player)
+        return self._player
 
     def _on_toggle_favorite(self, _event: object = None) -> str:
         channel = self.selected()

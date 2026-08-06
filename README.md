@@ -66,6 +66,20 @@ streams are pooled, so the second becomes a fallback rather than a duplicate row
 
 The built-in list can be disabled but not removed.
 
+## Atresmedia and Mediaset
+
+Antena 3, laSexta, Neox, Nova, Mega, Atreseries, Telecinco, Cuatro, FDF, Energy, Divinity,
+Boing and Be Mad are missing from the TDTChannels playlist: those broadcasters stream only
+through their own sites, so there is no open URL to hand to VLC.
+
+ZapTV lists them anyway, under a **Web channels** playlist created in `~/.config/zaptv/` on
+first run. Selecting one opens the broadcaster's official live page in your browser instead
+of VLC. Nothing is scraped or decrypted — it is the page the broadcaster intends you to
+watch, and the file is yours to edit or remove.
+
+The seven Mediaset channels also show Now/Next; the Atresmedia ones have no guide data
+because the TDTChannels EPG does not carry them.
+
 ## Status
 
 Milestone 5 — browse, search, favorites, recents, Now/Next guide, logos, theming and

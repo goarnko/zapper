@@ -213,3 +213,36 @@ def test_late_logos_reach_every_row_sharing_a_url(tmp_path):
         assert all(browser.tree.item(i, "image") for i in browser._rows)
     finally:
         root.destroy()
+
+
+def test_web_channels_open_in_the_browser_whatever_the_default_player():
+    """A channel naming its own player overrides the configured default."""
+    if not _tk_available():
+        return
+
+    import tkinter as tk
+
+    from zaptv import ui
+    from zaptv.models import Channel
+    from zaptv.player import BrowserPlayer, VLCPlayer
+    from zaptv.settings import Settings
+    from zaptv.storage import Favorites, Recent
+
+    stream = Channel(name="La 1", group="G", streams=["https://x.invalid/s"])
+    web = Channel(
+        name="Antena 3", group="G", streams=["https://atresplayer.invalid/a3"], player="browser"
+    )
+
+    root = tk.Tk()
+    try:
+        browser = ui.ChannelBrowser(
+            root, [stream, web], VLCPlayer(), Favorites([]), Recent([]), None,
+            Settings(show_logos=False),
+        )
+        browser.pack()
+        root.update()
+
+        assert isinstance(browser._player_for(stream), VLCPlayer)
+        assert isinstance(browser._player_for(web), BrowserPlayer)
+    finally:
+        root.destroy()

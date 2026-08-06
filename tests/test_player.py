@@ -30,3 +30,44 @@ def test_missing_executable_raises(monkeypatch):
         assert "mpv" in str(exc)
     else:
         raise AssertionError("expected PlayerNotFound")
+
+
+# -- browser backend ----------------------------------------------------
+
+
+def test_browser_player_is_registered_but_not_user_selectable():
+    assert isinstance(player.get_player("browser"), player.BrowserPlayer)
+    # The browser is chosen per channel, never as a default for streams.
+    assert "browser" not in player.SELECTABLE
+    assert set(player.SELECTABLE) <= set(player.PLAYERS)
+
+
+def test_browser_player_passes_the_page_url_through():
+    args = player.BrowserPlayer().args("https://www.atresplayer.com/directos/antena3/")
+    assert args[-1] == "https://www.atresplayer.com/directos/antena3/"
+    assert args[0].endswith("xdg-open")
+
+
+def test_browser_player_falls_back_to_webbrowser(monkeypatch):
+    """Minimal desktops have no xdg-open; Python's opener knows other ways."""
+    monkeypatch.setattr(player.shutil, "which", lambda _cmd: None)
+    opened = []
+    import webbrowser
+
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url) or True)
+
+    assert player.BrowserPlayer().play("https://example.invalid/live") is None
+    assert opened == ["https://example.invalid/live"]
+
+
+def test_browser_player_raises_when_nothing_can_open_a_page(monkeypatch):
+    monkeypatch.setattr(player.shutil, "which", lambda _cmd: None)
+    import webbrowser
+
+    monkeypatch.setattr(webbrowser, "open", lambda _url: False)
+    try:
+        player.BrowserPlayer().play("https://example.invalid/live")
+    except player.PlayerNotFound:
+        pass
+    else:
+        raise AssertionError("expected PlayerNotFound")

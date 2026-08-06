@@ -2,7 +2,7 @@
 
 import sys
 
-from . import epg, providers, search, updater
+from . import epg, providers, search, updater, webchannels
 from .settings import Settings
 from .storage import Favorites, Recent
 
@@ -18,6 +18,9 @@ def main(argv: list[str] | None = None) -> int:
 
     config = Settings.load()
     sources = providers.ProviderList.load()
+    # Channels that only play on the broadcaster's own site; installed once,
+    # then owned by the user like any other playlist.
+    webchannels.install(sources)
 
     if "--providers" in argv:
         return _print_providers(sources)

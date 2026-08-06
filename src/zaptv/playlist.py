@@ -69,6 +69,10 @@ def parse(text: str, provider: str = "") -> list[Channel]:
                 logo=attrs.get("tvg-logo") or None,
                 tvg_id=attrs.get("tvg-id") or None,
                 provider=provider,
+                # Non-standard, ours: lets a playlist say which player a
+                # channel needs. Unknown to other M3U readers, which ignore
+                # unrecognised attributes.
+                player=attrs.get("zaptv-player", ""),
             )
             channels[(name, group)] = channel
 

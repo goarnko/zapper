@@ -64,10 +64,42 @@ class MPVPlayer(Player):
         return [self.executable(), stream_url]
 
 
+class BrowserPlayer(Player):
+    """Opens a page in the user's browser instead of a media player.
+
+    Some broadcasters publish no open stream and play only through their own
+    site. For those channels the "stream" is the official live page, and the
+    right player is whatever handles http:// — no stream extraction, no DRM
+    workaround, just the page the broadcaster intends people to watch.
+    """
+
+    command = "xdg-open"
+    label = "Web browser"
+
+    def args(self, page_url: str) -> list[str]:
+        return [self.executable(), page_url]
+
+    def play(self, page_url: str) -> subprocess.Popen | None:
+        """Hand the page to the desktop, falling back to Python's own opener."""
+        if self.is_available():
+            return super().play(page_url)
+        # Minimal desktops may lack xdg-open; webbrowser knows other ways.
+        import webbrowser
+
+        if not webbrowser.open(page_url):
+            raise PlayerNotFound("No web browser found to open this channel.")
+        return None
+
+
 PLAYERS: dict[str, type[Player]] = {
     "vlc": VLCPlayer,
     "mpv": MPVPlayer,
+    "browser": BrowserPlayer,
 }
+
+#: Players a user can pick as their default; the browser is only ever
+#: selected per channel, never for ordinary streams.
+SELECTABLE = ("vlc", "mpv")
 
 DEFAULT_PLAYER = "vlc"
 
