@@ -61,7 +61,9 @@ class MPVPlayer(Player):
     label = "mpv"
 
     def args(self, stream_url: str) -> list[str]:
-        return [self.executable(), stream_url]
+        # We spawn detached with no tty and output to DEVNULL; --no-terminal
+        # stops mpv trying to drive a terminal it does not have.
+        return [self.executable(), "--no-terminal", stream_url]
 
 
 class BrowserPlayer(Player):
@@ -105,4 +107,29 @@ DEFAULT_PLAYER = "vlc"
 
 
 def get_player(name: str = DEFAULT_PLAYER) -> Player:
+    """The named backend, or the default for an unknown name."""
     return PLAYERS.get(name.lower(), PLAYERS[DEFAULT_PLAYER])()
+
+
+def available(names: tuple[str, ...] = SELECTABLE) -> list[str]:
+    """Selectable backends actually installed on this machine."""
+    return [name for name in names if get_player(name).is_available()]
+
+
+def resolve(name: str = DEFAULT_PLAYER) -> Player:
+    """The named backend if it is installed, else one that is.
+
+    get_player alone only guards against an unknown *name*; a configured
+    player that has been uninstalled would still be handed back and fail at
+    the moment the user pressed Enter. Substituting at startup turns that
+    into something we can report before it ruins a click.
+
+    With nothing installed the configured player is returned anyway, so the
+    eventual PlayerNotFound names what the user actually asked for.
+    """
+    chosen = get_player(name)
+    if chosen.is_available():
+        return chosen
+    for alternative in available():
+        return get_player(alternative)
+    return chosen

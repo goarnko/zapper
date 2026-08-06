@@ -246,3 +246,91 @@ def test_web_channels_open_in_the_browser_whatever_the_default_player():
         assert isinstance(browser._player_for(web), BrowserPlayer)
     finally:
         root.destroy()
+
+
+def test_playing_records_the_channel_as_recent():
+    """The play path is shared by Enter and the Play-with menu."""
+    if not _tk_available():
+        return
+
+    import tkinter as tk
+
+    from zaptv import ui
+    from zaptv.models import Channel
+    from zaptv.player import Player, VLCPlayer
+    from zaptv.settings import Settings
+    from zaptv.storage import Favorites, Recent
+
+    played = []
+
+    class FakePlayer(Player):
+        command = "fake"
+        label = "Fake"
+
+        def args(self, stream_url):
+            return ["fake", stream_url]
+
+        def play(self, stream_url):
+            played.append(stream_url)
+            return None
+
+    channel = Channel(name="La 1", group="G", streams=["https://x.invalid/s"])
+    root = tk.Tk()
+    try:
+        recent = Recent([])
+        browser = ui.ChannelBrowser(
+            root, [channel], VLCPlayer(), Favorites([]), recent, None,
+            Settings(show_logos=False),
+        )
+        browser.pack()
+        root.update()
+
+        browser._play(channel, FakePlayer())
+        root.update()
+        assert played == ["https://x.invalid/s"]
+        assert recent.names == ["La 1"]
+    finally:
+        root.destroy()
+
+
+def test_a_missing_player_does_not_record_a_play(monkeypatch):
+    """A channel you could not watch has not been watched."""
+    if not _tk_available():
+        return
+
+    import tkinter as tk
+    from tkinter import messagebox
+
+    from zaptv import ui
+    from zaptv.models import Channel
+    from zaptv.player import Player, PlayerNotFound, VLCPlayer
+    from zaptv.settings import Settings
+    from zaptv.storage import Favorites, Recent
+
+    class MissingPlayer(Player):
+        command = "absent"
+        label = "Absent"
+
+        def args(self, stream_url):
+            return []
+
+        def play(self, stream_url):
+            raise PlayerNotFound("Absent not found")
+
+    monkeypatch.setattr(messagebox, "showerror", lambda *a, **k: None)
+
+    channel = Channel(name="La 1", group="G", streams=["https://x.invalid/s"])
+    root = tk.Tk()
+    try:
+        recent = Recent([])
+        browser = ui.ChannelBrowser(
+            root, [channel], VLCPlayer(), Favorites([]), recent, None,
+            Settings(show_logos=False),
+        )
+        browser.pack()
+        root.update()
+
+        browser._play(channel, MissingPlayer())
+        assert recent.names == []
+    finally:
+        root.destroy()

@@ -19,7 +19,7 @@ from . import logos as logos_module
 from . import providers as providers_module
 from . import search, theme, updater
 from .models import Channel, Programme
-from .player import SELECTABLE, Player, PlayerNotFound, get_player
+from .player import PLAYERS, SELECTABLE, Player, PlayerNotFound, get_player, resolve
 from .settings import Settings
 from .storage import Favorites, Recent
 
@@ -440,6 +440,7 @@ class ChannelBrowser(tk.Frame):
         self.tree.bind("<KeyPress-f>", self._on_toggle_favorite)
         self.tree.bind("<KeyPress-F>", self._on_toggle_favorite)
         self.tree.bind("<<TreeviewSelect>>", lambda _e: self._update_guide())
+        self.tree.bind("<Button-3>", self._on_context_menu)
         self._entry.bind("<Return>", self._on_play)
         self._entry.bind("<Down>", self._focus_list)
 
@@ -489,7 +490,7 @@ class ChannelBrowser(tk.Frame):
     def retheme(self, config: Settings) -> None:
         """Re-apply settings that change how the list looks."""
         self._config = config
-        self._player = get_player(config.player)
+        self._player = resolve(config.player)
         self.apply_palette(theme.get(config.theme))
         self._refresh()
 
@@ -637,14 +638,52 @@ class ChannelBrowser(tk.Frame):
         channel = self.selected()
         if channel is None:
             return "break"
+        self._play(channel, self._player_for(channel))
+        return "break"
+
+    def _on_context_menu(self, event: object) -> str:
+        """Offer the other players for this one channel."""
+        row = self.tree.identify_row(event.y)
+        if row not in self._rows:
+            return "break"
+        self.tree.selection_set(row)
+        channel = self._rows[row]
+
+        # tk.Menu is a classic widget: it takes colours directly, and without
+        # them it renders light grey over a dark app.
+        menu = tk.Menu(
+            self,
+            tearoff=0,
+            bg=self._palette.field_bg,
+            fg=self._palette.fg,
+            activebackground=self._palette.select_bg,
+            activeforeground=self._palette.select_fg,
+            disabledforeground=self._palette.muted,
+            borderwidth=0,
+        )
+        for name in PLAYERS:
+            backend = get_player(name)
+            label = f"Play with {backend.label}"
+            menu.add_command(
+                label=label if backend.is_available() else f"{label} (not installed)",
+                state=tk.NORMAL if backend.is_available() else tk.DISABLED,
+                command=lambda n=name, c=channel: self._play(c, get_player(n)),
+            )
         try:
-            self._player_for(channel).play(channel.stream)
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+        return "break"
+
+    def _play(self, channel: Channel, player: Player) -> None:
+        """Hand a channel to a player and record that it was watched."""
+        try:
+            player.play(channel.stream)
         except PlayerNotFound as exc:
             messagebox.showerror("Player not found", str(exc), parent=self)
-            return "break"
+            return
         self._recent.push(channel.name)
         self._refresh()
-        return "break"
 
     def _player_for(self, channel: Channel) -> Player:
         """The channel's own player when it names one, else the default.
@@ -740,10 +779,11 @@ def run(
     set_window_icon(root)
 
     store = logos_module.LogoStore() if config.show_logos else None
+    chosen = resolve(config.player)
     browser = ChannelBrowser(
         root,
         channels,
-        get_player(config.player),
+        chosen,
         favorites or Favorites.load(),
         recent or Recent.load(),
         guide,
@@ -760,6 +800,12 @@ def run(
     root.bind("<Control-p>", browser.open_providers)
     root.bind("<Escape>", browser.clear_search)
     root.bind("<Control-q>", lambda _e: root.destroy())
+
+    # Say so up front rather than letting the first Enter fail.
+    if chosen.command != get_player(config.player).command:
+        browser.status.config(
+            text=f"{config.player} is not installed — using {chosen.label}"
+        )
 
     browser.tree.focus_set()
     try:

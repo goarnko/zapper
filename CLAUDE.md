@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Status
 
-Milestones 1–5 are done: download → parse → browse → play, settings, search, favorites, recently-watched, a Now/Next guide from XMLTV, channel logos, light/dark themes, a settings window, an app icon, and multiple playlist providers with merging.
+Milestones 1–6 are done: download → parse → browse → play, settings, search, favorites, recently-watched, a Now/Next guide from XMLTV, channel logos, light/dark themes, a settings window, an app icon, and multiple playlist providers with merging.
 
-Also done, ahead of Milestone 6: a `BrowserPlayer` backend and a "Web channels" playlist, which is how the Atresmedia and Mediaset channels finally appear.
+A `BrowserPlayer` backend and a "Web channels" playlist are how the Atresmedia and Mediaset channels appear.
+
+Much of Milestone 6 was already delivered incrementally — the VLC and mpv backends, selection in the settings window, and `is_available` detection all predate it. What it added was **resolution** (`player.resolve`), a per-channel *Play with…* menu, and `--players`.
 
 **Not** done in Milestone 5: Pluto TV is not bundled as a named provider. Users can add its M3U by URL, but there is no built-in entry for it.
 
@@ -28,6 +30,8 @@ PYTHONPATH=src python3 -m zaptv --list             # channels as TSV (no GUI nee
 PYTHONPATH=src python3 -m zaptv --search malaga    # same, filtered
 PYTHONPATH=src python3 -m zaptv --now              # Now/Next per channel
 PYTHONPATH=src python3 -m zaptv --providers        # configured playlist sources
+PYTHONPATH=src python3 -m zaptv --players          # which player backends are installed
+PYTHONPATH=src python3 -m zaptv --player mpv       # override the configured player
 python3 -m pytest tests -q                         # tests
 python3 -m ruff check src tests                    # lint
 python3 -m mypy                                    # type check (config in pyproject)
@@ -43,6 +47,7 @@ These come from `SPEC.md`/`STACK.md`; don't relitigate them without the user ask
 
 - **Near-zero runtime dependencies.** M3U parsing is hand-rolled, EPG uses stdlib `gzip` + `xml.etree.ElementTree`, networking is `urllib.request` (not requests/curl/wget), storage is plain JSON. **Pillow is the one deliberate exception**, agreed for Milestone 4: nearly every channel logo is JPEG and Tk's `PhotoImage` reads only PNG/GIF, so there is no stdlib path to logos. Don't add a second dependency without asking. Dev tooling (pytest/ruff/mypy) doesn't count.
 - **No video playback in-process, ever.** Players live behind the `Player` ABC in `player.py`; a new backend is a new subclass plus a `PLAYERS` entry. `VLCPlayer` is the default, `MPVPlayer` exists for Milestone 6, `BrowserPlayer` handles channels whose "stream" is a web page. `PLAYERS` is every backend; `SELECTABLE` is the subset a user may pick as their default — the browser is chosen per channel only.
+- **`get_player` vs `resolve`.** `get_player(name)` guards only against an unknown *name*; a configured player that has since been uninstalled would still be returned and fail the moment the user pressed Enter. `resolve(name)` substitutes an installed backend at startup and the UI reports the substitution in the status bar. Use `resolve` for the default player, `get_player` when the caller has already decided (a channel's own `player`, a *Play with…* entry). `resolve` never substitutes the browser, since it is not in `SELECTABLE`.
 - **Never work around DRM or extract protected streams.** Where a broadcaster publishes no open stream, ZapTV opens the official live page in a browser. That is the whole approach; scraping session-bound stream URLs is both out of bounds and unmaintainable.
 - **Channels are never hardcoded or shipped.** Playlists are always downloaded (or read from a user's file) at runtime.
 - **The built-in TDTChannels provider can be disabled but never deleted.** Removing it by accident would leave a new user with an empty app and no route back; `ProviderList.load` re-inserts it if a config file lacks it.
@@ -85,6 +90,10 @@ Two things to know before changing it:
 
 - **The seed list is written into the user's config, not shipped in the package.** `install()` writes `~/.config/zaptv/web-channels.m3u` once and registers it as an ordinary local provider; after that it is the user's file to edit or delete. This is a deliberate reading of the "channels are never shipped" rule — nothing is baked in at runtime, and the seed is only a starting point. `install()` is a no-op if either the file exists or the provider is registered, so a user who removes it does not get it back silently.
 - **Page URLs are stable brand addresses**, unlike session-bound stream URLs, which is why this survives where a scraped playlist rots. All 13 were verified to return 200; `mitele.es` now redirects to `mediasetinfinity.es`, so the canonical URLs are stored.
+
+### Mirror failover was considered and rejected
+
+75 of 471 channels carry more than one mirror (up to 9), and only `streams[0]` is ever played. Automatic failover was measured against the live playlist before building it: 13 of 14 sampled first mirrors returned 200, and the one failure (ETB Deportes) returned 403 on *every* mirror — geo-blocking, which failover cannot fix. A pre-flight probe would have added 0.1–1.4s to every play for almost no benefit. Don't add it without new evidence; a manual "next mirror" action would be the better shape if this comes up again.
 
 Guide coverage is split: the seven Mediaset channels have XMLTV ids (`Telecinco.TV`, `Cuatro.TV`, `FDF.TV`, `Energy.TV`, `Divinity.TV`, `Boing.TV`, `Bemad.TV`) and show Now/Next; the six Atresmedia ones are absent from the TDTChannels EPG entirely and never will until that feed adds them.
 

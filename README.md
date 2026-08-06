@@ -8,7 +8,7 @@ Channels come from the [TDTChannels](https://www.tdtchannels.com/) playlist and 
 
 - Python 3.13+
 - Tkinter — `sudo apt install python3-tk`
-- VLC — `sudo apt install vlc`
+- VLC — `sudo apt install vlc` (mpv also works: `sudo apt install mpv`)
 - Pillow — installed with the package; needed to decode channel logos
 
 ## Usage
@@ -40,6 +40,8 @@ Add `--search <query>` to filter the TSV output, `--now` to print what is on air
 | `Ctrl+P` | Manage playlists |
 | `Esc` | Clear the search |
 | `Ctrl+Q` | Quit |
+
+Right-click a channel for **Play with…** to send it to a different player just once.
 
 Search ignores accents, so `malaga` finds *101TV Málaga*. Favorites and recently watched channels appear at the top of the list.
 
@@ -82,8 +84,8 @@ because the TDTChannels EPG does not carry them.
 
 ## Status
 
-Milestone 5 — browse, search, favorites, recents, Now/Next guide, logos, theming and
-multiple playlist sources.
+Milestone 6 — browse, search, favorites, recents, Now/Next guide, logos, theming,
+multiple playlist sources and selectable players (VLC, mpv, browser).
 
 - [SPEC.md](SPEC.md) — what the app is and is not
 - [STACK.md](STACK.md) — technology decisions

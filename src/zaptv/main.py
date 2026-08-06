@@ -17,6 +17,11 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config = Settings.load()
+    if "--player" in argv:
+        index = argv.index("--player")
+        if index + 1 < len(argv):
+            config.player = argv[index + 1]
+
     sources = providers.ProviderList.load()
     # Channels that only play on the broadcaster's own site; installed once,
     # then owned by the user like any other playlist.
@@ -24,6 +29,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if "--providers" in argv:
         return _print_providers(sources)
+
+    if "--players" in argv:
+        return _print_players()
 
     channels, failed = sources.load_channels(refresh=config.auto_update)
     for name in failed:
@@ -61,6 +69,18 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     ui.run(channels, config, Favorites.load(), Recent.load(), _load_guide(config), sources)
+    return 0
+
+
+def _print_players() -> int:
+    """Report which player backends this machine can actually use."""
+    from . import player as player_module
+
+    for name, cls in player_module.PLAYERS.items():
+        backend = cls()
+        state = "installed" if backend.is_available() else "missing  "
+        role = "selectable" if name in player_module.SELECTABLE else "per-channel"
+        print(f"{state}  {name:8} {backend.label:14} ({role})")
     return 0
 
 

@@ -178,11 +178,21 @@ Player independence.
 - Player selection
 - Player detection
 
-The browser backend is already built, ahead of this milestone, because
-the Atresmedia and Mediaset channels needed it: opening the broadcaster's
-web player is a player choice, not a playlist source. See BrowserPlayer
-and the per-channel zaptv-player attribute. What remains here is player
-selection and detection for the ordinary stream backends.
+Done. The VLC and mpv backends, selection in the settings window and
+availability detection were delivered across earlier milestones; this one
+added player resolution (an uninstalled choice is substituted at startup
+rather than failing on the first Enter), a per-channel "Play with..."
+menu, and the --players and --player flags.
+
+The browser backend arrived early, because the Atresmedia and Mediaset
+channels needed it: opening the broadcaster's web player is a player
+choice, not a playlist source. See BrowserPlayer and the per-channel
+zaptv-player attribute.
+
+Automatic failover between a channel's mirrors was measured and rejected
+-- see CLAUDE.md. Sampled first mirrors were healthy, and the one failure
+was geo-blocked on every mirror, so probing would have cost every play
+and fixed nothing.
 
 Deliverable
 
