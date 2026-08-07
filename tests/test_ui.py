@@ -353,6 +353,7 @@ def test_right_click_does_not_play_the_first_menu_entry(monkeypatch):
         return
 
     import shutil
+    import time
     import tkinter as tk
 
     from zaptv import ui
@@ -418,8 +419,16 @@ def test_right_click_does_not_play_the_first_menu_entry(monkeypatch):
         # measured against the real thing, releasing that grab left an outside
         # click unable to close the menu in four tries out of four.
         assert str(root.grab_current()) == str(menu), "the menu must keep its grab"
+
+        # unpost is synchronous but winfo_ismapped only flips once Tk has the
+        # server's UnmapNotify, so wait for it rather than sampling once: one
+        # update() was enough on XWayland and not under Xvfb, which failed CI.
         menu.event_generate("<Escape>")
-        root.update()
+        for _ in range(200):
+            root.update()
+            if not menu.winfo_ismapped():
+                break
+            time.sleep(0.01)
         assert not menu.winfo_ismapped(), "Escape must close the menu"
     finally:
         root.destroy()
