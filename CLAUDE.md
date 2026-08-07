@@ -74,6 +74,8 @@ The list is a **`ttk.Treeview`**, not a `Listbox` — only Treeview supports a p
 
   This is where a screenshot cannot help: the menu is a separate override-redirect X window, so `xwd -id <app>` never contains it, and `xwd` on the menu itself fails `BadMatch` under XWayland. `xwininfo -root -tree | grep '"!menu"'` shows whether it is posted and where. Driving it needs real pointer events — there is no `xdotool` here, but `libXtst` takes `XTestFakeMotionEvent`/`XTestFakeButtonEvent` through `ctypes`. Verify against a window that has been `focus_force`ed: XTEST key events go to whatever holds focus, so testing an unfocused window makes Escape look broken and a stale grab-holding menu swallows later clicks. Both misled this investigation before the controlled run corrected it.
 
+  **Never assert menu dismissal by generating `<Escape>`.** Tk delivers a synthetic key to whatever holds *focus*, and a bare X server has no window manager to give anything focus, so under Xvfb the event never reaches the menu, no binding fires, and a perfectly healthy menu reads as stuck — two red CI runs went that way. `tk focus` is `''` there and `.` on a real desktop; `Priv(popup)` still names the menu and `unpost()` works fine. Call `root.tk.call("tk::MenuEscape", menu)` instead: it needs no focus and behaves identically on Xvfb and a real desktop. `focus_force()` does not rescue the key — it moves focus to the toplevel, so the menu stops receiving it on *both*.
+
 Theming lives in `theme.py`. ttk ignores widget-level colour options, so the Treeview and the settings dialog need configured *styles* (`style_dialog`), and the `clam` theme is used because the default Linux ttk theme ignores Treeview background settings entirely.
 
 Shortcuts follow `SPEC.md`: Enter plays, `Ctrl+F` focuses search, `F` favorites, `Ctrl+R` forces a playlist and guide update, `Esc` clears the search, `Ctrl+,` opens settings, `Ctrl+P` opens the playlist sources window. **`Esc` no longer quits** — `Ctrl+Q` does.
@@ -191,7 +193,20 @@ Two halves to it, worth keeping apart:
   ```
 
   Run mypy **from the repository root** or it will not find `[tool.mypy]` in `pyproject.toml` and will exit with "Missing target module".
+
+  Note the mypy pin drifts: 1.20 already imports the compiled `librt`, so "1.x" is no longer enough — 1.18.2 is the newest that still runs pure-Python. Check with `python3 -c "import mypy.build"` before trusting a version.
 - Tkinter **is** installed (Tk 8.6) and the session is Wayland with XWayland on `:0`, so the GUI runs.
+- **Xvfb is not installed, and CI runs the GUI suite under it.** That gap is worth closing before trusting a GUI test, because a bare X server has no window manager and Tk behaves differently — it cost two red CI runs here. `sudo apt install xvfb` needs a password, but Xvfb runs perfectly well extracted, the same trick as the Python toolchain:
+
+  ```bash
+  apt-get download xvfb xserver-common x11-xkb-utils xkb-data libxfont2 libpixman-1-0 libunwind8
+  for d in *.deb; do dpkg -x "$d" root; done
+  LD_LIBRARY_PATH=root/usr/lib/x86_64-linux-gnu \
+    root/usr/bin/Xvfb :99 -screen 0 1280x1024x24 -xkbdir root/usr/share/X11/xkb &
+  DISPLAY=:99 <toolchain> python3 -m pytest tests -q       # what CI actually runs
+  ```
+
+  Run the GUI suite on **both** `:0` and `:99`; a green `:0` is not evidence about CI.
 
 VLC is present at `/usr/bin/vlc`; mpv is not installed.
 

@@ -353,6 +353,7 @@ def test_right_click_does_not_play_the_first_menu_entry(monkeypatch):
         return
 
     import shutil
+    import time
     import tkinter as tk
 
     from zaptv import ui
@@ -419,13 +420,22 @@ def test_right_click_does_not_play_the_first_menu_entry(monkeypatch):
         # click unable to close the menu four times out of four, while keeping
         # it closed on all four.
         #
-        # That the grab is held is the part this code decides, so it is the
-        # part asserted here. Whether Escape then unposts is Tk's own
-        # behaviour, and asserting it turned out to be environment-dependent:
-        # a synthetic <Escape> unposts the menu under XWayland but not under
-        # the Xvfb that CI runs the GUI suite on, even given two seconds to
-        # do it. Real dismissal is verified by hand instead — see the popup
-        # menu entry in CLAUDE.md for how to drive real pointer events.
+        # That the grab is held is the part this code decides, so it is
+        # asserted first and on its own.
         assert str(root.grab_current()) == str(menu), "the menu must keep its grab"
+
+        # Then that the menu does close, by calling Tk's Escape handler rather
+        # than generating the key. Tk delivers a synthetic key to whatever holds
+        # focus, and under a bare X server there is no window manager to give
+        # anything focus, so `event_generate("<Escape>")` never reaches the menu
+        # and the menu looks stuck when it is not. Calling the handler needs no
+        # focus and behaves the same on Xvfb and a real desktop.
+        root.tk.call("tk::MenuEscape", menu)
+        for _ in range(100):
+            root.update()
+            if not menu.winfo_ismapped():
+                break
+            time.sleep(0.01)
+        assert not menu.winfo_ismapped(), "the menu must close"
     finally:
         root.destroy()
