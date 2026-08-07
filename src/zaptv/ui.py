@@ -469,7 +469,11 @@ class ChannelBrowser(tk.Frame):
         self.tree.bind("<KeyPress-f>", self._on_toggle_favorite)
         self.tree.bind("<KeyPress-F>", self._on_toggle_favorite)
         self.tree.bind("<<TreeviewSelect>>", lambda _e: self._update_guide())
-        self.tree.bind("<Button-3>", self._on_context_menu)
+        # On the release, not the press: a menu posted on <Button-3> is still
+        # under the pointer when the matching <ButtonRelease-3> arrives, and
+        # Tk's own binding turns that release into an invoke of the active
+        # entry. Posting on the release means there is none left to deliver.
+        self.tree.bind("<ButtonRelease-3>", self._on_context_menu)
         self._entry.bind("<Return>", self._on_play)
         self._entry.bind("<Down>", self._focus_list)
 
@@ -703,6 +707,12 @@ class ChannelBrowser(tk.Frame):
 
         # tk.Menu is a classic widget: it takes colours directly, and without
         # them it renders light grey over a dark app.
+        #
+        # The border must not be zero. tk_popup puts the menu's top-left corner
+        # exactly on the pointer, so with no border the pointer lands inside
+        # the first entry, which Tk then activates on <Enter>. A flat one-pixel
+        # border is drawn in the menu's own background — invisible, but enough
+        # that "@0,0" resolves to no entry at all.
         menu = tk.Menu(
             self,
             tearoff=0,
@@ -711,7 +721,8 @@ class ChannelBrowser(tk.Frame):
             activebackground=self._palette.select_bg,
             activeforeground=self._palette.select_fg,
             disabledforeground=self._palette.muted,
-            borderwidth=0,
+            borderwidth=1,
+            relief=tk.FLAT,
         )
         for name in PLAYERS:
             backend = get_player(name)
@@ -721,9 +732,17 @@ class ChannelBrowser(tk.Frame):
                 state=tk.NORMAL if backend.is_available() else tk.DISABLED,
                 command=self._play_command(channel, name),
             )
+        # The grab tk_popup takes is what makes the menu dismissable: a click
+        # outside only reaches it while it holds one, and Tk hands the grab back
+        # itself when it unposts. Releasing it here — the idiom the Tkinter docs
+        # give, written for the platforms where tk_popup blocks until the menu
+        # closes — leaves a menu on X11 that a click cannot close. Until the
+        # first entry stopped firing on the opening click, which unposted the
+        # menu immediately, that was invisible. It is released only if posting
+        # failed, so a half-posted menu cannot leave the pointer grabbed.
         try:
             menu.tk_popup(event.x_root, event.y_root)
-        finally:
+        except tk.TclError:
             menu.grab_release()
         return "break"
 

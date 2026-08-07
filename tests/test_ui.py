@@ -334,3 +334,92 @@ def test_a_missing_player_does_not_record_a_play(monkeypatch):
         assert recent.names == []
     finally:
         root.destroy()
+
+
+def test_right_click_does_not_play_the_first_menu_entry(monkeypatch):
+    """Opening the Play with... menu must not start playing anything.
+
+    tk_popup posts the menu with its top-left corner on the pointer. Posted on
+    <Button-3>, the matching release then lands on the menu, and Tk's own
+    `bind Menu <ButtonRelease>` invokes whichever entry is active — the first
+    one, if the pointer is inside it. Both halves are pinned here: the menu is
+    posted on the release so none is left to deliver, and a one-pixel border
+    keeps the pointer out of entry zero.
+
+    The whole gesture is driven, press and release, so this fails against
+    either binding rather than merely noticing which one is in use.
+    """
+    if not _tk_available():
+        return
+
+    import shutil
+    import tkinter as tk
+
+    from zaptv import ui
+    from zaptv.models import Channel
+    from zaptv.player import Player, VLCPlayer
+    from zaptv.settings import Settings
+    from zaptv.storage import Favorites, Recent
+
+    # Every backend must look installed, or its entry is disabled and could
+    # not be invoked whatever the bindings do. CI has neither VLC nor mpv.
+    monkeypatch.setattr(shutil, "which", lambda command: f"/usr/bin/{command}")
+
+    played: list[str] = []
+    monkeypatch.setattr(Player, "play", lambda self, stream_url: played.append(stream_url))
+
+    channels = [
+        Channel(name=f"Channel {i:03d}", group="Generalistas", streams=[f"https://x.invalid/{i}"])
+        for i in range(20)
+    ]
+
+    root = tk.Tk()
+    root.geometry("420x640")
+    try:
+        browser = ui.ChannelBrowser(
+            root, channels, VLCPlayer(), Favorites([]), Recent([]), None,
+            Settings(show_logos=False),
+        )
+        browser.pack(fill=tk.BOTH, expand=True)
+        root.update()
+
+        row = next(i for i in browser.tree.get_children() if i in browser._rows)
+        box = browser.tree.bbox(row)
+        assert box, "the row must be on screen for a right-click to reach it"
+        x, y = box[0] + 20, box[1] + 5
+
+        # One right-click, in full: press, then release with the pointer still
+        # where it was pressed.
+        browser.tree.event_generate("<Button-3>", x=x, y=y)
+        root.update()
+        browser.tree.event_generate("<ButtonRelease-3>", x=x, y=y)
+        root.update()
+
+        menus = [w for w in browser.winfo_children() if isinstance(w, tk.Menu)]
+        assert menus, "the right-click should have posted a menu"
+        menu = menus[-1]
+        assert menu.winfo_ismapped(), "the menu should be posted"
+
+        # X delivers the release of that same click to the menu now under the
+        # pointer, which is what used to invoke entry zero.
+        menu.event_generate("<Enter>", x=0, y=0)
+        root.update()
+        menu.event_generate("<ButtonRelease-3>", x=0, y=0)
+        root.update()
+
+        assert played == [], "opening the menu must not play anything"
+        # Why it cannot: the pointer lands in the border, so no entry is active
+        # for a release to invoke.
+        assert menu.index("@0,0") is None
+        assert menu.index("active") is None
+
+        # Opening a menu that nothing can close would be no better than the
+        # bug. It stays dismissable because it keeps the grab tk_popup took:
+        # measured against the real thing, releasing that grab left an outside
+        # click unable to close the menu in four tries out of four.
+        assert str(root.grab_current()) == str(menu), "the menu must keep its grab"
+        menu.event_generate("<Escape>")
+        root.update()
+        assert not menu.winfo_ismapped(), "Escape must close the menu"
+    finally:
+        root.destroy()
