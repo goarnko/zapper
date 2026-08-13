@@ -53,6 +53,48 @@ GRID_BLOCK_PAD = 4
 #: How far channel names sit inside their section heading.
 GRID_INDENT = 16
 
+#: Every shortcut, grouped as the help window shows them. Kept here rather
+#: than written out in the window so the menu accelerators and the help text
+#: cannot drift apart, and so a test can check each one against the widget
+#: bindings that actually exist.
+SHORTCUTS: list[tuple[str, list[tuple[str, str]]]] = [
+    (
+        "Channel list",
+        [
+            ("Enter", "Play the selected channel"),
+            ("Double-click", "Play the channel"),
+            ("Right-click", "Send this channel to another player, once"),
+            ("F", "Favorite or unfavorite (only from the list)"),
+            ("Ctrl+F", "Jump to the search box"),
+            ("↓", "Move from the search box into the list"),
+            ("Esc", "Clear the search — Esc does not quit"),
+            ("Click a group", "Fold or unfold that group"),
+        ],
+    ),
+    (
+        "Windows",
+        [
+            ("Ctrl+G", "Full TV guide"),
+            ("Ctrl+P", "Playlist sources"),
+            ("Ctrl+,", "Settings"),
+            ("Ctrl+R", "Update playlists and guide now"),
+            ("F1", "This help"),
+            ("Ctrl+Q", "Quit"),
+        ],
+    ),
+    (
+        "Guide window",
+        [
+            ("← →", "Move back and forward one hour"),
+            ("Ctrl+F", "Jump to the filter box"),
+            ("Esc", "Clear the filter, or close the window"),
+            ("Click", "Show a programme's description"),
+            ("Double-click", "Play that channel"),
+            ("Click a heading", "Fold or unfold that group"),
+        ],
+    ),
+]
+
 
 def format_slot(programme: Programme | None) -> str:
     """One line for a programme, in the viewer's local time."""
@@ -168,6 +210,55 @@ def style_dialog(style: ttk.Style, palette: theme.Palette) -> None:
         relief=tk.FLAT,
     )
     style.map("Treeview.Heading", background=[("active", palette.select_bg)])
+
+
+class HelpWindow(tk.Toplevel):
+    """The keyboard and mouse shortcuts, rendered from SHORTCUTS.
+
+    Plain labels in a grid rather than a Text widget: the content is a fixed
+    two-column table, and a Text would need its own tag configuration to
+    match the theme for no gain.
+    """
+
+    def __init__(self, master: tk.Misc, palette: theme.Palette):
+        super().__init__(master)
+        self.title("ZapTV Shortcuts")
+        # Wide enough for the longest description and tall enough for the
+        # Close button; both were cut off at 460x580.
+        self.geometry("520x690")
+        self.minsize(440, 480)
+        self.transient(master.winfo_toplevel())
+        self.configure(bg=palette.bg)
+        style_dialog(ttk.Style(self), palette)
+
+        bold = tkfont.nametofont("TkDefaultFont").copy()
+        bold.configure(weight="bold")
+        mono = tkfont.nametofont("TkFixedFont")
+
+        body = ttk.Frame(self, padding=14, style="Zap.TFrame")
+        body.pack(fill=tk.BOTH, expand=True)
+        body.columnconfigure(1, weight=1)
+
+        row = 0
+        for heading, entries in SHORTCUTS:
+            tk.Label(
+                body, text=heading, font=bold, anchor="w", bg=palette.bg, fg=palette.fg
+            ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(12 if row else 0, 4))
+            row += 1
+            for keys, what in entries:
+                tk.Label(
+                    body, text=keys, font=mono, anchor="w", bg=palette.bg, fg=palette.fg
+                ).grid(row=row, column=0, sticky="w", padx=(0, 12))
+                tk.Label(
+                    body, text=what, anchor="w", bg=palette.bg, fg=palette.muted
+                ).grid(row=row, column=1, sticky="w")
+                row += 1
+
+        ttk.Button(body, text="Close", command=self.destroy, style="Zap.TButton").grid(
+            row=row, column=0, columnspan=2, sticky="e", pady=(16, 0)
+        )
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.bind("<F1>", lambda _e: self.destroy())
 
 
 class ProvidersWindow(tk.Toplevel):
@@ -566,6 +657,7 @@ class GuideWindow(tk.Toplevel):
         self.bind("<Left>", lambda _e: self._arrow(self._page_back))
         self.bind("<Right>", lambda _e: self._arrow(self._page_on))
         self.bind("<Control-f>", lambda _e: self.focus_filter())
+        self.bind("<F1>", lambda _e: HelpWindow(self, self._palette))
         self.bind("<Escape>", lambda _e: self._on_escape())
 
     # -- time window -----------------------------------------------------
@@ -1437,6 +1529,28 @@ class ChannelBrowser(tk.Frame):
         SettingsWindow(self, self._config, self._palette, self.retheme)
         return "break"
 
+    def play_selected(self, _event: object = None) -> str:
+        """Menu wrapper for Enter, so both routes share one implementation."""
+        return self._on_play()
+
+    def toggle_favorite(self, _event: object = None) -> str:
+        """Menu wrapper for F."""
+        return self._on_toggle_favorite()
+
+    def play_with_command(self, player_name: str) -> Callable[[], None]:
+        """Menu entry that sends whatever is selected to one named player."""
+
+        def command() -> None:
+            channel = self.selected()
+            if channel is not None:
+                self._play(channel, get_player(player_name))
+
+        return command
+
+    def open_help(self, _event: object = None) -> str:
+        HelpWindow(self, self._palette)
+        return "break"
+
     def open_guide(self, _event: object = None) -> str:
         """The whole schedule, over the guide already loaded here."""
         GuideWindow(
@@ -1496,6 +1610,98 @@ class ChannelBrowser(tk.Frame):
         return "break"
 
 
+def bind_shortcuts(root: tk.Tk, browser: "ChannelBrowser") -> None:
+    """Window-level keys, bound on the toplevel so they work from any widget.
+
+    Kept out of run() so a test can attach them to a bare root and check that
+    every key SHORTCUTS advertises is one something actually listens for.
+    """
+    root.bind("<Control-f>", browser.focus_search)
+    root.bind("<Control-r>", browser.reload)
+    root.bind("<Control-comma>", browser.open_settings)
+    root.bind("<Control-p>", browser.open_providers)
+    root.bind("<Control-g>", browser.open_guide)
+    root.bind("<Escape>", browser.clear_search)
+    root.bind("<F1>", browser.open_help)
+    root.bind("<Control-q>", lambda _e: root.destroy())
+
+
+def _themed_menu(master: tk.Misc, palette: theme.Palette) -> tk.Menu:
+    """A menu painted for the current theme.
+
+    tk.Menu is a classic widget, so it takes colours directly rather than
+    through a ttk style — without them it renders light grey over a dark app.
+    """
+    return tk.Menu(
+        master,
+        tearoff=0,
+        bg=palette.field_bg,
+        fg=palette.fg,
+        activebackground=palette.select_bg,
+        activeforeground=palette.select_fg,
+        disabledforeground=palette.muted,
+    )
+
+
+def build_menubar(root: tk.Tk, browser: "ChannelBrowser") -> tk.Menu:
+    """Attach the menu bar, so the features are findable without the README.
+
+    Every entry is a shortcut that already exists; the menus add discovery,
+    not behaviour. Accelerator strings are labels only — Tk does not bind
+    them — and the real bindings stay in run(), which is why the test checks
+    the two agree.
+
+    tk.Menu is a classic widget and takes colours directly. Unlike the
+    per-channel Play with... menu, none of this is posted with tk_popup, so
+    the pointer-lands-on-entry-zero problem does not arise here.
+    """
+    palette = browser._palette
+    bar = _themed_menu(root, palette)
+
+    file_menu = _themed_menu(bar, palette)
+    file_menu.add_command(label="Update now", accelerator="Ctrl+R", command=browser.reload)
+    file_menu.add_separator()
+    file_menu.add_command(
+        label="Playlists…", accelerator="Ctrl+P", command=browser.open_providers
+    )
+    file_menu.add_command(
+        label="Settings…", accelerator="Ctrl+,", command=browser.open_settings
+    )
+    file_menu.add_separator()
+    file_menu.add_command(label="Quit", accelerator="Ctrl+Q", command=root.destroy)
+    bar.add_cascade(label="File", menu=file_menu)
+
+    channel_menu = _themed_menu(bar, palette)
+    channel_menu.add_command(label="Play", accelerator="Enter", command=browser.play_selected)
+    channel_menu.add_command(
+        label="Favorite / unfavorite", accelerator="F", command=browser.toggle_favorite
+    )
+    play_with = _themed_menu(channel_menu, palette)
+    for name in PLAYERS:
+        backend = get_player(name)
+        play_with.add_command(
+            label=backend.label if backend.is_available() else f"{backend.label} (not installed)",
+            state=tk.NORMAL if backend.is_available() else tk.DISABLED,
+            command=browser.play_with_command(name),
+        )
+    channel_menu.add_cascade(label="Play with…", menu=play_with)
+    bar.add_cascade(label="Channel", menu=channel_menu)
+
+    view_menu = _themed_menu(bar, palette)
+    view_menu.add_command(label="TV guide", accelerator="Ctrl+G", command=browser.open_guide)
+    view_menu.add_command(label="Search", accelerator="Ctrl+F", command=browser.focus_search)
+    bar.add_cascade(label="View", menu=view_menu)
+
+    help_menu = _themed_menu(bar, palette)
+    help_menu.add_command(
+        label="Keyboard shortcuts", accelerator="F1", command=browser.open_help
+    )
+    bar.add_cascade(label="Help", menu=help_menu)
+
+    root.config(menu=bar)
+    return bar
+
+
 def run(
     channels: list[Channel],
     config: Settings | None = None,
@@ -1527,13 +1733,8 @@ def run(
     browser.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
     root.config(bg=browser._palette.bg)
 
-    root.bind("<Control-f>", browser.focus_search)
-    root.bind("<Control-r>", browser.reload)
-    root.bind("<Control-comma>", browser.open_settings)
-    root.bind("<Control-p>", browser.open_providers)
-    root.bind("<Control-g>", browser.open_guide)
-    root.bind("<Escape>", browser.clear_search)
-    root.bind("<Control-q>", lambda _e: root.destroy())
+    bind_shortcuts(root, browser)
+    build_menubar(root, browser)
 
     # Say so up front rather than letting the first Enter fail.
     if chosen.command != get_player(config.player).command:

@@ -88,7 +88,11 @@ Groups (and Favorites/Recent) expand and collapse, and the collapsed set persist
 
 Theming lives in `theme.py`. ttk ignores widget-level colour options, so the Treeview and the settings dialog need configured *styles* (`style_dialog`), and the `clam` theme is used because the default Linux ttk theme ignores Treeview background settings entirely.
 
-Shortcuts follow `SPEC.md`: Enter plays, `Ctrl+F` focuses search, `F` favorites, `Ctrl+R` forces a playlist and guide update, `Esc` clears the search, `Ctrl+,` opens settings, `Ctrl+P` opens the playlist sources window, `Ctrl+G` opens the guide grid. **`Esc` no longer quits** — `Ctrl+Q` does.
+Shortcuts follow `SPEC.md`: Enter plays, `Ctrl+F` focuses search, `F` favorites, `Ctrl+R` forces a playlist and guide update, `Esc` clears the search, `Ctrl+,` opens settings, `Ctrl+P` opens the playlist sources window, `Ctrl+G` opens the guide grid, `F1` shows the shortcut list. **`Esc` no longer quits** — `Ctrl+Q` does.
+
+**`SHORTCUTS` in `ui.py` is the single source** for the help window, and `bind_shortcuts` is deliberately factored out of `run()` so a test can attach the keys to a bare root and assert that every key the help advertises is one something actually listens for. Without that split the bindings were unreachable from a test. Note Tk reports a plain-letter binding as the bare letter (`'f'`), not the `<KeyPress-f>` the source spells — the test learned that the hard way.
+
+The menu bar (`build_menubar`) adds discovery, not behaviour: every entry calls the same method a shortcut does, and accelerator strings are labels only — Tk does not bind them, which is why a test checks the label matches the real key. `tk.Menu` is classic, so `_themed_menu` passes colours directly; none of it is posted with `tk_popup`, so the pointer-lands-on-entry-zero trap that governs the *Play with…* menu does not apply here.
 
 ## The guide grid
 

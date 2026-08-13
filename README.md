@@ -52,19 +52,42 @@ Add `--search <query>` to filter the TSV output, `--now` to print what is on air
 
 ## Keyboard
 
+There is a menu bar for all of this, and `F1` shows the same list inside the app.
+
+**Channel list**
+
 | Key | Action |
 | --- | --- |
 | `Enter` | Play the selected channel |
+| `F` | Favorite / unfavorite — from the list, not the search box |
 | `Ctrl+F` | Jump to the search box |
-| `F` | Favorite / unfavorite |
-| `Ctrl+R` | Update the playlist and guide now |
-| `Ctrl+G` | Open the full guide grid |
-| `Ctrl+,` | Open settings |
-| `Ctrl+P` | Manage playlists |
-| `Esc` | Clear the search |
+| `↓` | Move from the search box into the list |
+| `Esc` | Clear the search — `Esc` does **not** quit |
+
+Double-click plays. Right-click a channel for **Play with…**, which sends it to a different
+player just once. Clicking a group's arrow folds it.
+
+**Windows**
+
+| Key | Action |
+| --- | --- |
+| `Ctrl+G` | Full TV guide |
+| `Ctrl+P` | Playlist sources |
+| `Ctrl+,` | Settings |
+| `Ctrl+R` | Update playlists and guide now |
+| `F1` | Keyboard shortcuts |
 | `Ctrl+Q` | Quit |
 
-Right-click a channel for **Play with…** to send it to a different player just once.
+**Guide window**
+
+| Key | Action |
+| --- | --- |
+| `←` `→` | Move back and forward one hour |
+| `Ctrl+F` | Jump to the filter box |
+| `Esc` | Clear the filter, or close the window |
+
+Click a programme for its description, double-click to play that channel, and click a section
+heading to fold it.
 
 Search ignores accents, so `malaga` finds *101TV Málaga*. Favorites and recently watched channels appear at the top of the list.
 
