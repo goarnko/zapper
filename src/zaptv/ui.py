@@ -859,6 +859,12 @@ class ChannelBrowser(tk.Frame):
         #: them unselectable.
         self._rows: dict[str, Channel] = {}
         self._row_order: list[str] = []
+        #: Treeview row id -> section label, for the collapsible headers.
+        self._sections: dict[str, str] = {}
+        self._collapsed: set[str] = set(self._config.collapsed_groups)
+        #: True while _refresh is rebuilding, so the open/close events it
+        #: causes are not mistaken for the user collapsing something.
+        self._rebuilding = False
 
         self.query = tk.StringVar()
         self.query.trace_add("write", lambda *_: self._refresh())
@@ -919,6 +925,8 @@ class ChannelBrowser(tk.Frame):
         self.tree.bind("<KeyPress-f>", self._on_toggle_favorite)
         self.tree.bind("<KeyPress-F>", self._on_toggle_favorite)
         self.tree.bind("<<TreeviewSelect>>", lambda _e: self._update_guide())
+        self.tree.bind("<<TreeviewOpen>>", lambda _e: self._on_section_toggled(False))
+        self.tree.bind("<<TreeviewClose>>", lambda _e: self._on_section_toggled(True))
         # On the release, not the press: a menu posted on <Button-3> is still
         # under the pointer when the matching <ButtonRelease-3> arrives, and
         # Tk's own binding turns that release into an invoke of the active
@@ -993,6 +1001,7 @@ class ChannelBrowser(tk.Frame):
         # Rebuilding the list loses the selection; favoriting or playing must
         # not throw the user back to the top of several hundred channels.
         previous = self.selected()
+        self._rebuilding = True
 
         visible = search.filter_channels(self._channels, self.query.get())
         by_name = {c.name: c for c in visible}
@@ -1000,6 +1009,7 @@ class ChannelBrowser(tk.Frame):
         self.tree.delete(*self.tree.get_children())
         self._rows.clear()
         self._row_order.clear()
+        self._sections.clear()
 
         favorites = sorted(
             (c for c in visible if c.name in self._favorites), key=search.sort_key
@@ -1017,15 +1027,31 @@ class ChannelBrowser(tk.Frame):
 
         self._update_status(len(visible))
         self._restore_selection(previous)
+        self._rebuilding = False
         # Selecting from code does not fire <<TreeviewSelect>>.
         self._update_guide()
 
     def _add_section(self, label: str, channels: list[Channel]) -> None:
-        self.tree.insert("", tk.END, text=label, tags=("header",))
+        # Channels are children of their section, which is what makes the
+        # section collapsible at all. Headers stay out of _rows, so they
+        # remain unselectable exactly as when everything was flat.
+        #
+        # A filter forces every section open: searching and being shown a
+        # row of collapsed headers, with the matches hidden inside them,
+        # would look like the search had failed. The saved state is not
+        # touched, so clearing the filter restores what the user chose.
+        section = self.tree.insert(
+            "",
+            tk.END,
+            text=label,
+            tags=("header",),
+            open=bool(self.query.get().strip()) or label not in self._collapsed,
+        )
+        self._sections[section] = label
         for channel in channels:
             marker = f"{_STAR} " if channel.name in self._favorites else "   "
             item = self.tree.insert(
-                "",
+                section,
                 tk.END,
                 text=f"{marker}{channel.name}",
                 image=self._image_for(channel),
@@ -1033,6 +1059,66 @@ class ChannelBrowser(tk.Frame):
             )
             self._rows[item] = channel
             self._row_order.append(item)
+
+    # -- collapsing sections ---------------------------------------------
+
+    def _on_section_toggled(self, collapsed: bool) -> None:
+        """Record the user opening or closing a section, and remember it.
+
+        Only user actions reach here with effect: _refresh sets `open` as it
+        inserts, and Treeview.see opens ancestors to reveal a selection, both
+        of which fire the same virtual events. Persisting those would let a
+        redraw silently undo what the user chose.
+        """
+        if self._rebuilding:
+            return
+        item = self.tree.focus()
+        label = self._sections.get(item)
+        if label is None:
+            return
+
+        if collapsed:
+            self._collapsed.add(label)
+            self._hide_selection_inside(item)
+        else:
+            self._collapsed.discard(label)
+
+        # A filter forces sections open for the duration; recording that as
+        # intent would wipe the user's collapsed set the moment they typed.
+        if self.query.get().strip():
+            return
+        self._config.collapsed_groups = sorted(self._collapsed)
+        self._config.save()
+
+    def _is_visible(self, item: str) -> bool:
+        """True when every ancestor of a row is open, so the row is on screen."""
+        parent = self.tree.parent(item)
+        while parent:
+            if not self.tree.item(parent, "open"):
+                return False
+            parent = self.tree.parent(parent)
+        return True
+
+    def _hide_selection_inside(self, section: str) -> None:
+        """Move the selection out of a section the user just collapsed.
+
+        Leaving it there would keep a channel selected that is no longer on
+        screen, so Enter would play something invisible.
+        """
+        current = self.tree.selection()
+        if not current or self.tree.parent(current[0]) != section:
+            return
+        for item in self._row_order:
+            if self._is_visible(item):
+                self.tree.selection_set(item)
+                self.tree.focus(item)
+                self.tree.see(item)
+                self._update_guide()
+                return
+        # Everything is collapsed: better nothing selected than a hidden
+        # channel that Enter would play.
+        self.tree.selection_remove(*current)
+        self._update_guide()
 
     def _update_status(self, count: int) -> None:
         total = len(self._channels)
@@ -1045,15 +1131,17 @@ class ChannelBrowser(tk.Frame):
         target = None
         if previous is not None:
             # Prefer the group entry over the favorites copy, so the channels
-            # around the selection stay in view.
+            # around the selection stay in view — and only a row that is
+            # actually on screen, because see() opens a row's ancestors and
+            # would quietly re-expand a section the user had collapsed.
             for item in reversed(self._row_order):
-                if self._rows[item] is previous:
+                if self._rows[item] is previous and self._is_visible(item):
                     target = item
                     break
 
         restored = target is not None
-        if target is None and self._row_order:
-            target = self._row_order[0]
+        if target is None:
+            target = next((i for i in self._row_order if self._is_visible(i)), None)
         if target is None:
             return
 

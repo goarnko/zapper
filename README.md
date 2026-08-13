@@ -68,6 +68,8 @@ Right-click a channel for **Play with…** to send it to a different player just
 
 Search ignores accents, so `malaga` finds *101TV Málaga*. Favorites and recently watched channels appear at the top of the list.
 
+Channels are grouped — 30 regional and thematic sections — and each one folds away by clicking its arrow. Collapsed groups are remembered between runs. Searching temporarily opens everything, so a match is never hidden inside a folded group.
+
 ## TV guide
 
 Selecting a channel shows what is on now and what is next, from the TDTChannels XMLTV feed.

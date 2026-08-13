@@ -61,7 +61,17 @@ These come from `SPEC.md`/`STACK.md`; don't relitigate them without the user ask
 
 `ui.py` holds only widget wiring; matching and ordering live in `search.py` so they can be tested without a display.
 
-The list is a **`ttk.Treeview`**, not a `Listbox` — only Treeview supports a per-row image, which channel logos need. Section headers are Treeview rows *absent from `_rows`*, which is exactly what makes them unselectable: `selected()` returns `None` for them.
+The list is a **`ttk.Treeview`**, not a `Listbox` — only Treeview supports a per-row image, which channel logos need. Section headers are Treeview rows *absent from `_rows`*, which is exactly what makes them unselectable: `selected()` returns `None` for them. Channels are **children** of their section, which is what makes sections collapsible; headers stay out of `_rows` either way.
+
+### Collapsible sections
+
+Groups (and Favorites/Recent) expand and collapse, and the collapsed set persists in `Settings.collapsed_groups`. Everything here exists to stop a redraw quietly undoing what the user chose:
+
+- **`_rebuilding` guards persistence.** `_refresh` sets `open` as it inserts, and `Treeview.see` opens a row's ancestors to reveal a selection — both fire the same `<<TreeviewOpen>>`/`<<TreeviewClose>>` a user click does. Persisting those would let any keystroke wipe the collapsed set.
+- **`_restore_selection` only targets *visible* rows**, for the same reason: `see()` on a row inside a collapsed section would re-expand it.
+- **A filter forces every section open** and deliberately does *not* record that. Searching and being shown a screen of collapsed headers, matches hidden inside, reads as a broken search. Clearing the filter restores the user's state.
+- **Collapsing moves the selection out of the closed section**, otherwise Enter would play a channel that is no longer on screen. With everything collapsed it clears the selection instead — better than a hidden channel that Enter still plays.
+- **Missing key means expanded**, so an older `settings.json` opens exactly as before. `Settings.load` drops `collapsed_groups` unless it is a list of strings: a bare string would iterate as characters and "collapse" groups named `A`, `n`, `d`… It is the one field whose wrong type fails quietly rather than loudly.
 
 - The list is rebuilt from scratch on every keystroke, favorite toggle, and play. `_refresh` therefore saves and restores the selection; without that, favoriting throws the user back to the top of ~471 channels.
 - **`see()` on an unmapped widget scrolls its target to the very top**, hiding the section header above it — the list then looks unlabelled at startup. `_restore_selection` uses `yview_moveto(0)` when nothing carried over (startup, or a search that dropped the selection) and only calls `see()` when genuinely restoring a selection, by which point the widget is mapped. `after_idle` does *not* fix this: idle callbacks run before the window is mapped.

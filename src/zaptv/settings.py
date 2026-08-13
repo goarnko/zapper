@@ -6,7 +6,7 @@ belong in XDG config, the playlist is disposable and belongs in XDG data.
 
 import json
 import os
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 
@@ -27,6 +27,10 @@ class Settings:
     #: Ask GitHub, at most daily, whether a newer ZapTV was released. This
     #: only reports; nothing is downloaded or replaced.
     check_updates: bool = True
+    #: Section labels the user has collapsed in the channel list, as they
+    #: appear there (group names uppercased). Absent means expanded, so a
+    #: settings file from an older version opens everything as before.
+    collapsed_groups: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Settings":
@@ -45,7 +49,19 @@ class Settings:
             return cls()
 
         known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in known})
+        kept = {k: v for k, v in data.items() if k in known}
+
+        # The only field whose wrong type fails quietly rather than loudly:
+        # a string here would iterate as characters and "collapse" groups
+        # named "A", "n", "d"... Anything that is not a list of strings is
+        # dropped back to the default.
+        groups = kept.get("collapsed_groups")
+        if groups is not None and not (
+            isinstance(groups, list) and all(isinstance(g, str) for g in groups)
+        ):
+            del kept["collapsed_groups"]
+
+        return cls(**kept)
 
     def save(self, path: Path | None = None) -> None:
         path = path or SETTINGS_PATH

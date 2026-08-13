@@ -384,7 +384,8 @@ def test_right_click_does_not_play_the_first_menu_entry(monkeypatch):
         browser.pack(fill=tk.BOTH, expand=True)
         root.update()
 
-        row = next(i for i in browser.tree.get_children() if i in browser._rows)
+        # Channel rows are children of their section header, not top level.
+        row = browser._row_order[0]
         box = browser.tree.bbox(row)
         assert box, "the row must be on screen for a right-click to reach it"
         x, y = box[0] + 20, box[1] + 5
@@ -437,5 +438,262 @@ def test_right_click_does_not_play_the_first_menu_entry(monkeypatch):
                 break
             time.sleep(0.01)
         assert not menu.winfo_ismapped(), "the menu must close"
+    finally:
+        root.destroy()
+
+
+# -- collapsible groups --------------------------------------------------
+
+
+def _browser_with_groups(root, settings=None, favorites=None, recent=None):
+    from zaptv import ui
+    from zaptv.models import Channel
+    from zaptv.player import VLCPlayer
+    from zaptv.settings import Settings
+    from zaptv.storage import Favorites, Recent
+
+    channels = [
+        Channel(name="Alfa", group="Uno", streams=["https://x.invalid/1"]),
+        Channel(name="Beta", group="Uno", streams=["https://x.invalid/2"]),
+        Channel(name="Gamma", group="Dos", streams=["https://x.invalid/3"]),
+    ]
+    return ui.ChannelBrowser(
+        root,
+        channels,
+        VLCPlayer(),
+        Favorites(favorites or []),
+        Recent(recent or []),
+        None,
+        settings or Settings(show_logos=False),
+    )
+
+
+def _section(browser, label):
+    for item, name in browser._sections.items():
+        if name == label:
+            return item
+    raise AssertionError(f"no section {label!r} in {list(browser._sections.values())}")
+
+
+def test_channels_are_children_of_their_group():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        browser = _browser_with_groups(root)
+        browser.pack()
+        root.update()
+
+        # Top level is sections only; channels hang off them.
+        top = browser.tree.get_children()
+        assert all(i not in browser._rows for i in top)
+        uno = _section(browser, "UNO")
+        assert [browser.tree.item(c, "text").strip() for c in browser.tree.get_children(uno)] == [
+            "Alfa",
+            "Beta",
+        ]
+    finally:
+        root.destroy()
+
+
+def test_groups_start_expanded_by_default():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        browser = _browser_with_groups(root)
+        browser.pack()
+        root.update()
+        assert all(browser.tree.item(i, "open") for i in browser._sections)
+    finally:
+        root.destroy()
+
+
+def test_a_collapsed_group_from_settings_starts_closed():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv.settings import Settings
+
+    root = tk.Tk()
+    try:
+        browser = _browser_with_groups(
+            root, Settings(show_logos=False, collapsed_groups=["UNO"])
+        )
+        browser.pack()
+        root.update()
+        assert not browser.tree.item(_section(browser, "UNO"), "open")
+        assert browser.tree.item(_section(browser, "DOS"), "open")
+    finally:
+        root.destroy()
+
+
+def test_collapsing_is_saved_to_settings(tmp_path, monkeypatch):
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv import settings as settings_module
+    from zaptv.settings import Settings
+
+    path = tmp_path / "settings.json"
+    # save() with no argument falls back to the module-level path, so this
+    # keeps the test off the user's real config file.
+    monkeypatch.setattr(settings_module, "SETTINGS_PATH", path)
+    config = Settings(show_logos=False)
+    config.save()
+
+    root = tk.Tk()
+    try:
+        browser = _browser_with_groups(root, config)
+        browser.pack()
+        root.update()
+
+        uno = _section(browser, "UNO")
+        browser.tree.item(uno, open=False)
+        browser.tree.focus(uno)
+        browser._on_section_toggled(True)
+
+        assert Settings.load(path).collapsed_groups == ["UNO"]
+
+        browser.tree.focus(uno)
+        browser._on_section_toggled(False)
+        assert Settings.load(path).collapsed_groups == []
+    finally:
+        root.destroy()
+
+
+def test_collapsing_survives_a_refresh():
+    """The list is rebuilt on every keystroke, favorite and play."""
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv.settings import Settings
+
+    root = tk.Tk()
+    try:
+        browser = _browser_with_groups(
+            root, Settings(show_logos=False, collapsed_groups=["UNO"])
+        )
+        browser.pack()
+        root.update()
+
+        browser._refresh()
+        root.update()
+        assert not browser.tree.item(_section(browser, "UNO"), "open")
+    finally:
+        root.destroy()
+
+
+def test_a_rebuild_does_not_record_its_own_open_events(monkeypatch):
+    """_refresh and see() both fire the same events a user click does."""
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv.settings import Settings
+
+    root = tk.Tk()
+    try:
+        browser = _browser_with_groups(
+            root, Settings(show_logos=False, collapsed_groups=["UNO"])
+        )
+        browser.pack()
+        root.update()
+
+        saved = []
+        monkeypatch.setattr(browser._config, "save", lambda: saved.append(1))
+
+        browser._refresh()
+        root.update()
+        assert saved == [], "a redraw persisted a collapse state change"
+        assert browser._collapsed == {"UNO"}
+    finally:
+        root.destroy()
+
+
+def test_searching_opens_every_section_without_changing_the_saved_state():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv.settings import Settings
+
+    root = tk.Tk()
+    try:
+        browser = _browser_with_groups(
+            root, Settings(show_logos=False, collapsed_groups=["UNO"])
+        )
+        browser.pack()
+        root.update()
+
+        browser.query.set("alfa")
+        root.update()
+        # The match lives in the collapsed group; hiding it would look broken.
+        assert all(browser.tree.item(i, "open") for i in browser._sections)
+        assert browser._collapsed == {"UNO"}
+
+        browser.query.set("")
+        root.update()
+        assert not browser.tree.item(_section(browser, "UNO"), "open")
+    finally:
+        root.destroy()
+
+
+def test_collapsing_moves_the_selection_out_of_the_hidden_group():
+    """Otherwise Enter would play a channel that is no longer on screen."""
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        browser = _browser_with_groups(root)
+        browser.pack()
+        root.update()
+
+        # Groups sort alphabetically, so DOS comes first and _row_order[0] is
+        # Gamma; Alfa has to be looked up rather than assumed.
+        alfa = next(i for i, c in browser._rows.items() if c.name == "Alfa")
+        browser.tree.selection_set(alfa)
+        assert browser.selected().name == "Alfa"
+
+        uno = _section(browser, "UNO")
+        browser.tree.item(uno, open=False)
+        browser.tree.focus(uno)
+        browser._on_section_toggled(True)
+
+        chosen = browser.selected()
+        assert chosen is not None, "nothing selected after collapsing"
+        assert chosen.name == "Gamma", "selection stayed inside the closed group"
+    finally:
+        root.destroy()
+
+
+def test_collapsing_everything_leaves_nothing_selected():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        browser = _browser_with_groups(root)
+        browser.pack()
+        root.update()
+
+        for label in ("UNO", "DOS"):
+            item = _section(browser, label)
+            browser.tree.item(item, open=False)
+            browser.tree.focus(item)
+            browser._on_section_toggled(True)
+
+        # Better nothing selected than a hidden channel Enter would play.
+        assert browser.selected() is None
     finally:
         root.destroy()
