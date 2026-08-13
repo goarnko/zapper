@@ -16,9 +16,12 @@ Channels come from the [TDTChannels](https://www.tdtchannels.com/) playlist and 
 **Debian / Ubuntu package** — builds a `.deb` and installs the launcher, desktop entry and icons:
 
 ```bash
-packaging/build-deb.sh
-sudo apt install ./dist/zaptv_0.1.0_all.deb
+sudo apt install "$(packaging/build-deb.sh)"
 ```
+
+Each packaging script prints the file it wrote, so the command above always installs the
+build it just made — no version number to keep in step, and no chance of picking up an
+older `.deb` left in `dist/`.
 
 **From a checkout, for your user only** — no root; the launcher points back at the
 checkout, so `git pull` updates the installed app:
@@ -30,8 +33,7 @@ packaging/install-user.sh      # and --uninstall to undo
 **AppImage:**
 
 ```bash
-packaging/build-appimage.sh
-./dist/ZapTV-0.1.0-x86_64.AppImage
+"$(packaging/build-appimage.sh)"
 ```
 
 Note the AppImage is *thin*: it carries ZapTV but uses the host's Python, Tkinter and
