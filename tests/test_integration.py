@@ -77,14 +77,33 @@ def test_guide_and_playlist_still_overlap():
         return
     body = updater.fetch(updater.PLAYLIST_URL).decode("utf-8", "replace")
     channels = playlist.parse(body)
-    path = updater.EPG_PATH
-    if not path.exists():
+    paths = [p for p in updater.ensure_epgs() if p.exists()]
+    if not paths:
         return
-    guide = epg.load(path)
+    guide = epg.load_all(paths)
 
     matched = [c for c in channels if guide.has(c.tvg_id)]
     # Coverage was ~27% when written; near zero would mean the join key broke.
     assert len(matched) > 20, "playlist and guide no longer share tvg-ids"
+
+
+def test_the_second_epg_source_still_carries_atresmedia():
+    """The whole reason that source exists.
+
+    Those six channels are absent from TDTChannels, so if this feed drops
+    them or renames their ids they go back to showing no guide at all — and
+    nothing else in the suite would notice.
+    """
+    if not ENABLED:
+        return
+    slug, url = updater.EPG_SOURCES[1]
+    guide = epg.load(updater.download(updater.epg_path(slug), url))
+    missing = [
+        tvg
+        for name, page, tvg in webchannels.SEED_CHANNELS
+        if "atresplayer.com" in page and not guide.has(tvg)
+    ]
+    assert not missing, f"second EPG source no longer carries {missing}"
 
 
 def test_web_channel_pages_are_reachable():

@@ -27,16 +27,17 @@ if TYPE_CHECKING:
 PROVIDER_NAME = "Web channels"
 GROUP = "Generalistas"
 
-#: (name, page URL, XMLTV id). The id is empty where the guide has no data
-#: for the channel — Atresmedia is absent from the TDTChannels EPG, Mediaset
-#: is present.
+#: (name, page URL, XMLTV id). Mediaset's ids come from the TDTChannels
+#: guide; Atresmedia is absent from that feed entirely, so theirs come from
+#: the second EPG source in updater.EPG_SOURCES. The two feeds share no ids,
+#: so mixing them here is unambiguous.
 SEED_CHANNELS = [
-    ("Antena 3", "https://www.atresplayer.com/directos/antena3/", ""),
-    ("laSexta", "https://www.atresplayer.com/directos/lasexta/", ""),
-    ("Neox", "https://www.atresplayer.com/directos/neox/", ""),
-    ("Nova", "https://www.atresplayer.com/directos/nova/", ""),
-    ("Mega", "https://www.atresplayer.com/directos/mega/", ""),
-    ("Atreseries", "https://www.atresplayer.com/directos/atreseries/", ""),
+    ("Antena 3", "https://www.atresplayer.com/directos/antena3/", "Antena.3.es"),
+    ("laSexta", "https://www.atresplayer.com/directos/lasexta/", "laSexta.es"),
+    ("Neox", "https://www.atresplayer.com/directos/neox/", "Neox.es"),
+    ("Nova", "https://www.atresplayer.com/directos/nova/", "Nova.es"),
+    ("Mega", "https://www.atresplayer.com/directos/mega/", "Mega.es"),
+    ("Atreseries", "https://www.atresplayer.com/directos/atreseries/", "Atreseries.es"),
     ("Telecinco", "https://www.mediasetinfinity.es/directo/telecinco/", "Telecinco.TV"),
     ("Cuatro", "https://www.mediasetinfinity.es/directo/cuatro/", "Cuatro.TV"),
     ("FDF", "https://www.mediasetinfinity.es/directo/fdf/", "FDF.TV"),
@@ -80,6 +81,56 @@ def write_seed(path: Path | None = None) -> Path:
     tmp.write_text(render(), encoding="utf-8")
     tmp.replace(path)
     return path
+
+
+#: How the Atresmedia entries were written before they had guide ids. Kept
+#: verbatim so upgrade_seed can recognise an untouched line and refuse to
+#: rewrite one the user has edited.
+_LEGACY_ATRESMEDIA = [
+    (name, url) for name, url, _ in SEED_CHANNELS if "atresplayer.com" in url
+]
+
+
+def upgrade_seed(path: Path | None = None) -> int:
+    """Add the Atresmedia guide ids to an already-written seed file.
+
+    Those six shipped with no tvg-id, because at the time no feed carried
+    them. install() is a no-op once the file exists, so without this an
+    existing user would never get the guide data the new EPG source makes
+    available.
+
+    A line is only rewritten when it still matches exactly what ZapTV wrote:
+    the file belongs to the user, and a line they have touched is left alone
+    even at the cost of that channel keeping no guide. Returns how many
+    lines were changed.
+    """
+    path = path or playlist_path()
+    if not path.exists():
+        return 0
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return 0
+
+    changed = 0
+    for name, url in _LEGACY_ATRESMEDIA:
+        old = f'#EXTINF:-1 zaptv-player="browser" group-title="{GROUP}",{name}\n{url}'
+        if old not in text:
+            continue
+        tvg_id = next(i for n, u, i in SEED_CHANNELS if n == name and u == url)
+        new = (
+            f'#EXTINF:-1 tvg-id="{tvg_id}" zaptv-player="browser" '
+            f'group-title="{GROUP}",{name}\n{url}'
+        )
+        text = text.replace(old, new)
+        changed += 1
+
+    if changed:
+        tmp = path.with_suffix(".m3u.part")
+        tmp.write_text(text, encoding="utf-8")
+        tmp.replace(path)
+    return changed
 
 
 def install(sources: "ProviderList", path: Path | None = None) -> bool:

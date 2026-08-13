@@ -27,6 +27,9 @@ def main(argv: list[str] | None = None) -> int:
     # Channels that only play on the broadcaster's own site; installed once,
     # then owned by the user like any other playlist.
     webchannels.install(sources)
+    # Existing seed files predate the Atresmedia guide ids; install() will not
+    # touch a file that already exists, so the ids are added here instead.
+    webchannels.upgrade_seed()
 
     if "--providers" in argv:
         return _print_providers(sources)
@@ -120,10 +123,12 @@ def _load_guide(config: Settings) -> epg.Guide:
     The guide is a nice-to-have: every failure here degrades to an empty
     Guide, and the app still lists and plays channels.
     """
-    path = updater.ensure_epg() if config.auto_update else updater.EPG_PATH
-    if path is None or not path.exists():
-        return epg.Guide()
-    return epg.load(path)
+    if config.auto_update:
+        return epg.load_all(updater.ensure_epgs())
+
+    updater.migrate_legacy_epg()
+    cached = [updater.epg_path(slug) for slug, _ in updater.EPG_SOURCES]
+    return epg.load_all(p for p in cached if p.exists())
 
 
 def _print_now(channels: list[Channel], config: Settings) -> int:

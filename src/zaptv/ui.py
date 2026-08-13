@@ -1181,10 +1181,14 @@ class ChannelBrowser(tk.Frame):
 
         # The guide is optional: a failure here should not spoil a successful
         # playlist refresh, so it is reported only in the status line.
-        try:
-            self._guide = epg_module.load(updater.download_epg())
-            self._update_guide()
-        except OSError:
+        # download_epgs keeps whatever succeeded rather than raising, so an
+        # empty list — not an exception — is what "no guide at all" looks
+        # like. One source failing while another works is silent on purpose:
+        # the user loses some channels' listings, not the feature.
+        paths = updater.download_epgs()
+        self._guide = epg_module.load_all(paths)
+        self._update_guide()
+        if not paths:
             self.status.config(text="Channel lists updated; guide unavailable")
             self.update_idletasks()
         return "break"

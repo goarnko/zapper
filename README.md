@@ -105,8 +105,8 @@ first run. Selecting one opens the broadcaster's official live page in your brow
 of VLC. Nothing is scraped or decrypted — it is the page the broadcaster intends you to
 watch, and the file is yours to edit or remove.
 
-The seven Mediaset channels also show Now/Next; the Atresmedia ones have no guide data
-because the TDTChannels EPG does not carry them.
+All thirteen show Now/Next. The Mediaset ones come from the TDTChannels guide; Atresmedia is
+missing from that feed entirely, so those six are filled in from a second XMLTV source.
 
 ## Updates
 

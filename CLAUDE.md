@@ -116,7 +116,9 @@ Two things to know before changing it:
 
 75 of 471 channels carry more than one mirror (up to 9), and only `streams[0]` is ever played. Automatic failover was measured against the live playlist before building it: 13 of 14 sampled first mirrors returned 200, and the one failure (ETB Deportes) returned 403 on *every* mirror — geo-blocking, which failover cannot fix. A pre-flight probe would have added 0.1–1.4s to every play for almost no benefit. Don't add it without new evidence; a manual "next mirror" action would be the better shape if this comes up again.
 
-Guide coverage is split: the seven Mediaset channels have XMLTV ids (`Telecinco.TV`, `Cuatro.TV`, `FDF.TV`, `Energy.TV`, `Divinity.TV`, `Boing.TV`, `Bemad.TV`) and show Now/Next; the six Atresmedia ones are absent from the TDTChannels EPG entirely and never will until that feed adds them.
+All 13 web channels now show Now/Next, but their ids come from **two different feeds**. Mediaset's are TDTChannels' (`Telecinco.TV`, `Cuatro.TV`, `FDF.TV`, `Energy.TV`, `Divinity.TV`, `Boing.TV`, `Bemad.TV`). Atresmedia is absent from that feed entirely, so `Antena.3.es`, `laSexta.es`, `Neox.es`, `Nova.es`, `Mega.es` and `Atreseries.es` come from the second source in `updater.EPG_SOURCES`. The two feeds share no ids at all, so mixing them in one seed file is unambiguous.
+
+`upgrade_seed` exists because those six shipped with **no** id: `install()` is a no-op once the file exists, so without it an existing user would never gain the data. It rewrites a line only when that line still matches byte-for-byte what ZapTV wrote — the file is the user's, and an edited line keeps no guide rather than being silently rewritten.
 
 ## Quality gates
 
@@ -160,7 +162,7 @@ Display-dependent tests skip rather than fail when there is no `DISPLAY`, so hea
 
 XDG-split, and both honor their env vars:
 
-- Cache (disposable): `~/.local/share/zaptv/` — `playlists/<slug>.m3u` (one per provider), `epg.xml.gz`, `logos/`. Playlists and guide refresh when >24h old; logos are cached forever under a hash of their URL plus the render size.
+- Cache (disposable): `~/.local/share/zaptv/` — `playlists/<slug>.m3u` (one per provider), `epg-<slug>.xml.gz` (one per EPG source), `logos/`. Playlists and guides refresh when >24h old; logos are cached forever under a hash of their URL plus the render size. `migrate_legacy_epg` renames the pre-multi-source `epg.xml.gz` to `epg-tdtchannels.xml.gz`, so upgrading does not force a re-download.
 - Config (user intent): `~/.config/zaptv/` — `settings.json`, `providers.json`, `favorites.json`, `recent.json`.
 
 Favorites and recents are keyed by **channel name**, not `(name, group)`, matching the flat JSON list in `SPEC.md`. That keeps a favorite alive when a channel changes group in an updated playlist; the cost is that two channels sharing a name across groups are favorited together. All three JSON files fall back to defaults rather than raising when corrupt — a bad config file must never stop playback.
@@ -180,7 +182,9 @@ Verified against the live TDTChannels list — these shaped the parser and will 
 
 The XMLTV feed is well-formed — all timestamps 14-digit and `+0000`, no missing stop times or titles, ~11k programmes over ~3.5 days, 52 ms to parse — so the parser's tolerance is about surviving a bad *download*, not bad data.
 
-The coverage gap is the thing to design around: **only 115 of 482 channels have guide data** (~24%; it was 126 of 471 when this was first measured — the feeds drift, so re-measure rather than trusting the figure). The playlist mostly lacks `tvg-id`, which is the only join key. So "no guide" is the *majority* case and is rendered as a quiet line in the pane, never an error. Every `Guide` lookup returns `None`/empty rather than raising, and a missing or corrupt cache yields an empty `Guide`.
+The coverage gap is the thing to design around: **137 of 482 channels have guide data** (~28%; 126 of 471 when first measured, 115 of 482 before the second EPG source — the feeds drift, so re-measure rather than trusting the figure). Mind the unit when comparing: that is a count of *channels*, and 15 tvg-ids are shared by more than one channel, so it is only **121 unique ids** — which is why the grid draws 121 rows, not 137. The playlist mostly lacks `tvg-id`, which is the only join key.
+
+**Guide data comes from more than one XMLTV feed.** `updater.EPG_SOURCES` lists them in preference order and each caches separately, so one being unreachable costs only its own channels — the rule `providers.py` already applies to playlists. `epg.load_all` merges them, and **the first source to carry a channel id owns it**: two feeds' programmes are never interleaved for one channel, because two overlapping schedules would show a channel apparently airing two things at once. Measured when added: the two feeds shared 0 ids out of 170 and 373, so nothing is being silently shadowed, and the second contributes exactly the six Atresmedia channels and nothing else. So "no guide" is the *majority* case and is rendered as a quiet line in the pane, never an error. Every `Guide` lookup returns `None`/empty rather than raising, and a missing or corrupt cache yields an empty `Guide`.
 
 61 XMLTV channel ids have programmes but no playlist channel — Atresmedia and Mediaset (`Cuatro.TV`, `Telecinco.TV`, `Bemad.TV`, …) among them. They have guide data but no stream, because those broadcasters gate live playback behind their own platforms (Atresplayer, Mitele). This is a known gap, scheduled under **Milestone 5**, and it is not a parser bug — don't try to fix it in `playlist.py`.
 

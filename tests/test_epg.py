@@ -194,3 +194,60 @@ def test_missing_file_gives_an_empty_guide(tmp_path):
 def test_empty_guide_answers_safely():
     assert epg.Guide().now_and_next("La1.TV") == (None, None)
     assert epg.Guide().has(None) is False
+
+
+# -- merging several sources --------------------------------------------
+
+SECOND_XML = """<?xml version='1.0' encoding='utf-8'?>
+<tv>
+  <channel id="Antena.3.es"><display-name>Antena 3</display-name></channel>
+  <programme channel="Antena.3.es" start="20260806050000 +0000" stop="20260806060000 +0000">
+    <title>Espejo Público</title>
+  </programme>
+  <programme channel="La1.TV" start="20260806050000 +0000" stop="20260806060000 +0000">
+    <title>Something else entirely</title>
+  </programme>
+</tv>
+"""
+
+
+def _write(tmp_path, name, text):
+    path = tmp_path / name
+    path.write_bytes(gzip.compress(text.encode("utf-8")))
+    return path
+
+
+def test_load_all_merges_channels_from_every_source(tmp_path):
+    first = _write(tmp_path, "a.xml.gz", XML)
+    second = _write(tmp_path, "b.xml.gz", SECOND_XML)
+    merged = epg.load_all([first, second])
+    assert merged.channels == {"La1.TV", "La2.TV", "Antena.3.es"}
+
+
+def test_load_all_lets_the_first_source_own_a_shared_channel(tmp_path):
+    """Two schedules for one channel would overlap on the grid."""
+    first = _write(tmp_path, "a.xml.gz", XML)
+    second = _write(tmp_path, "b.xml.gz", SECOND_XML)
+
+    merged = epg.load_all([first, second])
+    current, _ = merged.now_and_next("La1.TV", at(5, 30))
+    assert current is not None and current.title == "Telediario Matinal"
+    # ...and the loser's programme is not smuggled in alongside it.
+    assert len(merged.between("La1.TV", at(5), at(6))) == 1
+
+    # Reversing the order reverses who wins, so this is order, not luck.
+    other = epg.load_all([second, first])
+    won, _ = other.now_and_next("La1.TV", at(5, 30))
+    assert won is not None and won.title == "Something else entirely"
+
+
+def test_load_all_skips_an_unreadable_source(tmp_path):
+    good = _write(tmp_path, "a.xml.gz", XML)
+    bad = tmp_path / "b.xml.gz"
+    bad.write_text("not xml at all", encoding="utf-8")
+    merged = epg.load_all([good, bad, tmp_path / "absent.xml.gz"])
+    assert merged.channels == {"La1.TV", "La2.TV"}
+
+
+def test_load_all_of_nothing_is_an_empty_guide():
+    assert len(epg.load_all([])) == 0

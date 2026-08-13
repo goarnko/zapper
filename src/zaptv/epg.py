@@ -11,6 +11,7 @@ expected to render "no guide" as a normal state, not an error.
 import gzip
 import xml.etree.ElementTree as ET
 from bisect import bisect_right
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import IO, cast
@@ -192,3 +193,22 @@ def load(path: Path) -> Guide:
             return parse(handle)
     except (OSError, ET.ParseError, EOFError):
         return Guide()
+
+
+def load_all(paths: Iterable[Path]) -> Guide:
+    """Merge several XMLTV caches into one Guide, in preference order.
+
+    A channel id is owned by the first source that carries it, matching the
+    rule providers.py uses for playlists: earlier sources win. Merging is by
+    id and never interleaves two feeds' programmes for one channel, because
+    two schedules for the same channel would otherwise overlap on the grid
+    and produce a channel apparently showing two things at once.
+
+    One unreadable source costs only its own channels: `load` already turns
+    a corrupt file into an empty Guide.
+    """
+    merged: dict[str, list[Programme]] = {}
+    for path in paths:
+        for channel, programmes in load(path)._by_channel.items():
+            merged.setdefault(channel, programmes)
+    return Guide(merged)
