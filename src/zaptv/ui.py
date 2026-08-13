@@ -578,7 +578,7 @@ class GuideWindow(tk.Toplevel):
             self._draw_row(index, row, width)
         self._draw_now_line(width)
 
-        height = max(len(self._rows) * ROW_HEIGHT, 1)
+        height = self._height()
         for canvas in (self.slots, self.names):
             canvas.config(scrollregion=(0, 0, width, height))
 
@@ -649,7 +649,7 @@ class GuideWindow(tk.Toplevel):
             return
         frac = (at - self._start).total_seconds() / self._span.total_seconds()
         x = frac * width
-        height = max(len(self._rows) * ROW_HEIGHT, 1)
+        height = self._height()
         self.slots.create_line(x, 0, x, height, fill=self._palette.fg, width=2)
         self.ruler.create_line(x, 0, x, GRID_RULER_HEIGHT, fill=self._palette.fg, width=2)
 
@@ -677,15 +677,24 @@ class GuideWindow(tk.Toplevel):
         self._yview("scroll", str(amount), "units")
         return "break"
 
+    def _height(self) -> int:
+        """Scrollable height, which is also what _draw sets as the region."""
+        return max(len(self._rows) * ROW_HEIGHT, 1)
+
     def _canvas_y(self, event: "tk.Event[tk.Canvas]") -> float:
         """Pointer y in canvas coordinates rather than widget coordinates.
 
-        The two differ once the grid has been scrolled. Tk's stubs leave
-        canvasy untyped, hence the one ignore; x needs no such conversion
-        because time is paged rather than scrolled, so the canvas never
-        moves horizontally.
+        The two differ once the grid has been scrolled. Canvas.canvasy would
+        do this, but typeshed only started annotating it recently: a version
+        new enough to type it rejects the ignore the older one needs, so the
+        project cannot satisfy both. yview is typed either way, and since
+        _draw sets the scrollregion itself the offset is exactly the first
+        fraction times that height.
+
+        x needs no conversion: time is paged rather than scrolled, so the
+        canvas never moves horizontally.
         """
-        return float(self.slots.canvasy(event.y))  # type: ignore[no-untyped-call]
+        return event.y + self.slots.yview()[0] * self._height()
 
     def _at(self, event: "tk.Event[tk.Canvas]") -> tuple[Channel, Programme] | None:
         """The channel and programme under the pointer, if any."""

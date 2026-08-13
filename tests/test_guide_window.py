@@ -14,6 +14,8 @@ callback rather than by launching anything.
 import os
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from zaptv.epg import Guide
 from zaptv.models import Channel, Programme
 
@@ -172,6 +174,59 @@ def test_a_double_click_on_a_block_plays_that_channel():
         window._on_activate(event)
 
         assert [c.name for c in played] == ["Dos"]
+    finally:
+        root.destroy()
+
+
+def test_hit_testing_accounts_for_the_scroll_position():
+    """Pinned against Tk's own canvasy, which is the ground truth here.
+
+    ui._canvas_y does the conversion by hand because typeshed only recently
+    annotated Canvas.canvasy: a mypy new enough to type it rejects the ignore
+    an older one needs. Tests may call the untyped method (mypy relaxes
+    disallow_untyped_calls for tests), so it can serve as the oracle.
+    """
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv import theme, ui
+
+    # Enough rows to have something to scroll through.
+    channels = [
+        Channel(
+            name=f"Canal {i:02d}",
+            group="Generalistas",
+            streams=["https://x.invalid/s"],
+            tvg_id=f"{i:02d}.TV",
+        )
+        for i in range(40)
+    ]
+    guide = Guide(
+        {f"{i:02d}.TV": [_programme(f"{i:02d}.TV", f"Show {i}", 0, 120)] for i in range(40)}
+    )
+
+    root = tk.Tk()
+    try:
+        window = ui.GuideWindow(
+            root, guide, channels, theme.get("light"), lambda _c: None, now=NOW
+        )
+        window.geometry("700x240")
+        root.update()
+
+        window._yview("moveto", "0.5")
+        root.update()
+        assert window.slots.yview()[0] > 0, "nothing scrolled; the test proves nothing"
+
+        event: tk.Event[tk.Canvas] = tk.Event()
+        event.x = window.slots.winfo_width() // 2
+        event.y = 5
+        assert window._canvas_y(event) == pytest.approx(window.slots.canvasy(5))
+
+        # And the click lands on a scrolled-to row, not the first one.
+        found = window._at(event)
+        assert found is not None
+        assert found[0].name != "Canal 00"
     finally:
         root.destroy()
 

@@ -90,7 +90,7 @@ Shortcuts follow `SPEC.md`: Enter plays, `Ctrl+F` focuses search, `F` favorites,
 - **A channel with guide data but nothing in the current window keeps an empty row.** Dropping it would reflow the rows as the user pages through time, and a grid whose channels move under the pointer is worse than one with a gap.
 - Two canvases (names, slots) share one scrollbar through `_yview`; only `slots` reports back to the scrollbar, or the two feed each other. The names column sits under a blank spacer the height of the ruler so the labels stay level with their rows.
 - `Guide.between` is the query behind it: programmes *overlapping* a window, stepping back one from the bisect so the programme already on air occupies the left edge instead of vanishing.
-- Tk's stubs leave `Canvas.canvasy` untyped, so `_canvas_y` carries the one `type: ignore[no-untyped-call]` in the file.
+- **`_canvas_y` converts window y to canvas y by hand, and must not use `Canvas.canvasy`.** This is a second local-vs-CI stub gap, and it runs the *opposite* way to the Pillow one: typeshed only recently annotated `canvasy`, so the pinned local mypy (1.18.2) demands `type: ignore[no-untyped-call]` while CI's newer mypy rejects that same ignore as `unused-ignore`. No single annotation satisfies both — one red CI run went that way. `yview()` is typed in both, and `_draw` sets the scrollregion itself, so the offset is just `yview()[0] * height`. `tests/test_guide_window.py` pins the arithmetic against Tk's real `canvasy` at a scrolled position, which tests *may* call because mypy relaxes `disallow_untyped_calls` for `tests.*`.
 
 ## Providers
 
