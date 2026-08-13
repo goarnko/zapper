@@ -447,6 +447,10 @@ class GuideWindow(tk.Toplevel):
         self._span = grid.DEFAULT_SPAN
         self._start = self._floor(self._clock())
 
+        #: Rows the grid would show unfiltered — the denominator the footer
+        #: reports against while a filter is active.
+        self._total = len(grid.visible_channels(guide, channels, favorites))
+
         self._font = tkfont.nametofont("TkDefaultFont")
         self._build()
         self._reload()
@@ -457,11 +461,36 @@ class GuideWindow(tk.Toplevel):
         toolbar = ttk.Frame(self, padding=(8, 6), style="Zap.TFrame")
         toolbar.pack(fill=tk.X)
         for text, command in (("◀", self._page_back), ("Now", self._go_now), ("▶", self._page_on)):
-            ttk.Button(toolbar, text=text, width=4, command=command, style="Zap.TButton").pack(
-                side=tk.LEFT, padx=(0, 4)
-            )
+            ttk.Button(
+                toolbar,
+                text=text,
+                width=4,
+                command=command,
+                style="Zap.TButton",
+                # Paging must not pull focus out of the filter box mid-typing.
+                takefocus=False,
+            ).pack(side=tk.LEFT, padx=(0, 4))
         self.window_label = ttk.Label(toolbar, style="Zap.TLabel")
         self.window_label.pack(side=tk.LEFT, padx=(10, 0))
+
+        # Same filtering as the channel list, on the same search module, so
+        # "malaga" finds "101TV Málaga" here too. 121 rows is a lot to scroll
+        # when you know which channel you want.
+        self.query = tk.StringVar()
+        self.query.trace_add("write", lambda *_: self._on_query())
+        self._filter = tk.Entry(
+            toolbar,
+            textvariable=self.query,
+            width=18,
+            bg=self._palette.field_bg,
+            fg=self._palette.fg,
+            insertbackground=self._palette.fg,
+            highlightthickness=1,
+            highlightbackground=self._palette.border,
+            highlightcolor=self._palette.select_bg,
+            relief=tk.FLAT,
+        )
+        self._filter.pack(side=tk.RIGHT)
 
         middle = tk.Frame(self, bg=self._palette.bg)
         middle.pack(fill=tk.BOTH, expand=True, padx=8)
@@ -519,9 +548,14 @@ class GuideWindow(tk.Toplevel):
             # X11 reports the wheel as buttons 4 and 5, not <MouseWheel>.
             canvas.bind("<Button-4>", lambda _e: self._scroll(-1))
             canvas.bind("<Button-5>", lambda _e: self._scroll(1))
-        self.bind("<Left>", lambda _e: self._page_back())
-        self.bind("<Right>", lambda _e: self._page_on())
-        self.bind("<Escape>", lambda _e: self.destroy())
+        # Bound on the toplevel, so they fire whatever has focus — including
+        # the filter box, where Tk's own class binding has already moved the
+        # caret by the time these run. Paging as well would make the arrow
+        # keys unusable for editing, hence the guard in _typing.
+        self.bind("<Left>", lambda _e: self._arrow(self._page_back))
+        self.bind("<Right>", lambda _e: self._arrow(self._page_on))
+        self.bind("<Control-f>", lambda _e: self.focus_filter())
+        self.bind("<Escape>", lambda _e: self._on_escape())
 
     # -- time window -----------------------------------------------------
 
@@ -537,6 +571,28 @@ class GuideWindow(tk.Toplevel):
     def _end(self) -> datetime:
         return self._start + self._span
 
+    def _typing(self) -> bool:
+        """True when the filter box has focus, so arrows edit rather than page."""
+        return self.focus_get() is self._filter
+
+    def focus_filter(self, _event: object = None) -> str:
+        self._filter.focus_set()
+        self._filter.select_range(0, tk.END)
+        return "break"
+
+    def _on_escape(self) -> str:
+        """Clear the filter if there is one, otherwise close.
+
+        Matches the main window, where Escape clears the search rather than
+        quitting, while keeping Escape as the way out of a window with
+        nothing typed in it.
+        """
+        if self.query.get():
+            self.query.set("")
+            return "break"
+        self.destroy()
+        return "break"
+
     def _page_back(self) -> str:
         self._start -= grid.PAGE_STEP
         self._reload()
@@ -547,6 +603,17 @@ class GuideWindow(tk.Toplevel):
         self._reload()
         return "break"
 
+    def _arrow(self, page: Callable[[], str]) -> str:
+        """Page on an arrow key, unless the filter box is being typed in.
+
+        The guard belongs here and not in _page_back/_page_on, which the
+        toolbar buttons also call: putting it there would make clicking ◀
+        silently do nothing whenever the filter had focus.
+        """
+        if self._typing():
+            return ""
+        return page()
+
     def _go_now(self) -> str:
         self._start = self._floor(self._clock())
         self._reload()
@@ -554,16 +621,36 @@ class GuideWindow(tk.Toplevel):
 
     # -- drawing ---------------------------------------------------------
 
+    def _on_query(self) -> None:
+        """Rebuild for a new filter, and go back to the top.
+
+        Without the scroll reset, filtering 121 rows down to three while
+        scrolled near the bottom leaves the canvas showing empty space.
+        """
+        self._reload()
+        self._yview("moveto", "0")
+
     def _reload(self) -> None:
+        query = self.query.get()
         self._rows = grid.build(
-            self._guide, self._channels, self._start, self._end, self._favorites
+            self._guide,
+            search.filter_channels(self._channels, query),
+            self._start,
+            self._end,
+            self._favorites,
         )
         local_start = self._start.astimezone()
         local_end = self._end.astimezone()
         self.window_label.config(text=f"{local_start:%a %d %b  %H:%M} – {local_end:%H:%M}")
-        self.footer.config(
-            text=f"{len(self._rows)} of {len(self._channels)} channels have guide data"
-        )
+        if query.strip():
+            # Against the number of rows there could be, not the whole
+            # playlist: "3 of 482" would suggest the filter had thrown away
+            # channels that never had guide data to begin with.
+            self.footer.config(text=f"{len(self._rows)} of {self._total} channels match")
+        else:
+            self.footer.config(
+                text=f"{self._total} of {len(self._channels)} channels have guide data"
+            )
         self._draw()
 
     def _draw(self) -> None:

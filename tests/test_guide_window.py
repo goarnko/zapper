@@ -452,3 +452,176 @@ def test_the_browser_hands_its_favorites_to_the_guide():
         assert [r.channel.name for r in window._rows] == ["Uno", "Dos"]
     finally:
         root.destroy()
+
+
+# -- filtering -----------------------------------------------------------
+
+
+def test_the_filter_narrows_the_rows():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        window = _window(root)
+        root.update()
+        assert [r.channel.name for r in window._rows] == ["Dos", "Uno"]
+
+        window.query.set("uno")
+        root.update()
+        assert [r.channel.name for r in window._rows] == ["Uno"]
+
+        window.query.set("")
+        root.update()
+        assert [r.channel.name for r in window._rows] == ["Dos", "Uno"]
+    finally:
+        root.destroy()
+
+
+def test_the_filter_ignores_accents_like_the_channel_list():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv import theme, ui
+    from zaptv.epg import Guide
+
+    channels = [
+        Channel(name="Málaga TV", group="Andalucía", streams=["https://x"], tvg_id="M.TV")
+    ]
+    guide = Guide({"M.TV": [_programme("M.TV", "Show", 0, 60)]})
+
+    root = tk.Tk()
+    try:
+        window = ui.GuideWindow(
+            root, guide, channels, theme.get("light"), lambda _c: None, now=NOW
+        )
+        root.update()
+        window.query.set("malaga")
+        root.update()
+        assert [r.channel.name for r in window._rows] == ["Málaga TV"]
+    finally:
+        root.destroy()
+
+
+def test_the_footer_counts_matches_while_filtering():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        window = _window(root)
+        root.update()
+        assert "2 of 3 channels have guide data" in window.footer.cget("text")
+
+        window.query.set("uno")
+        root.update()
+        # Against the rows there could be, not the whole playlist.
+        assert "1 of 2 channels match" in window.footer.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_filtering_scrolls_back_to_the_top():
+    """Otherwise a filter applied while scrolled down shows empty space."""
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv import theme, ui
+    from zaptv.epg import Guide
+
+    channels = [
+        Channel(
+            name=f"Canal {i:02d}", group="G", streams=["https://x"], tvg_id=f"{i:02d}.TV"
+        )
+        for i in range(40)
+    ]
+    guide = Guide({f"{i:02d}.TV": [_programme(f"{i:02d}.TV", f"S{i}", 0, 120)] for i in range(40)})
+
+    root = tk.Tk()
+    try:
+        window = ui.GuideWindow(
+            root, guide, channels, theme.get("light"), lambda _c: None, now=NOW
+        )
+        window.geometry("700x240")
+        root.update()
+        window._yview("moveto", "0.5")
+        root.update()
+        assert window.slots.yview()[0] > 0
+
+        window.query.set("canal 3")
+        root.update()
+        assert window.slots.yview()[0] == 0.0
+    finally:
+        root.destroy()
+
+
+def test_escape_clears_the_filter_before_closing():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        window = _window(root)
+        root.update()
+        window.query.set("uno")
+        root.update()
+
+        window._on_escape()
+        assert window.query.get() == ""
+        assert window.winfo_exists()
+
+        # A second Escape, with nothing typed, closes it.
+        window._on_escape()
+        root.update()
+        assert not window.winfo_exists()
+    finally:
+        if window.winfo_exists():
+            root.destroy()
+        else:
+            root.destroy()
+
+
+def test_arrow_keys_do_not_page_while_typing_in_the_filter():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        window = _window(root)
+        root.update()
+        opening = window._start
+
+        window._filter.focus_force()
+        root.update()
+        window._arrow(window._page_back)
+        assert window._start == opening, "arrow paged while editing the filter"
+    finally:
+        root.destroy()
+
+
+def test_the_paging_buttons_work_regardless_of_filter_focus():
+    """The guard belongs on the key binding, not the shared method."""
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv import grid
+
+    root = tk.Tk()
+    try:
+        window = _window(root)
+        root.update()
+        window._filter.focus_force()
+        root.update()
+
+        opening = window._start
+        window._page_back()
+        assert window._start == opening - grid.PAGE_STEP
+    finally:
+        root.destroy()
