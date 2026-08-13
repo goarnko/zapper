@@ -9,6 +9,21 @@ on:
     # Weekly, to notice the upstream feeds changing shape before a user does.
     - cron: "0 6 * * 1"
 
+env:
+  # Pinned so a Pillow release cannot change CI under us between two runs of
+  # the same commit. pyproject deliberately keeps the loose `pillow>=10` for
+  # users: the .deb depends on the distro's python3-pil, and pinning a
+  # runtime dependency of a desktop app to one release would be wrong.
+  #
+  # Note what this does *not* fix: the SIGABRT seen in PIL's lazy plugin
+  # registration on 3.13 happened on 12.3.0 and passed on re-run on 12.3.0,
+  # so it is a race rather than a bad release, and a pin cannot cure it.
+  #
+  # Bumping this is how new Pillow stubs get exercised. CI is the only place
+  # that checks PIL calls at all, because the apt Pillow used for local
+  # development ships no py.typed — so leaving it stale hides type errors.
+  PILLOW_VERSION: "12.3.0"
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -35,7 +50,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -e ".[dev]" "pillow==${{ env.PILLOW_VERSION }}"
 
       - name: Lint
         run: ruff check src tests
@@ -64,7 +79,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends fakeroot desktop-file-utils
-          python -m pip install --upgrade pip pillow
+          python -m pip install --upgrade pip
+          python -m pip install "pillow==${{ env.PILLOW_VERSION }}"
 
       - name: Validate desktop entry
         run: desktop-file-validate packaging/zaptv.desktop
@@ -98,7 +114,7 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -e ".[dev]" "pillow==${{ env.PILLOW_VERSION }}"
 
       - name: Integration tests
         env:
