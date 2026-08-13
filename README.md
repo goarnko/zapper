@@ -71,8 +71,9 @@ Search ignores accents, so `malaga` finds *101TV Málaga*. Favorites and recentl
 Selecting a channel shows what is on now and what is next, from the TDTChannels XMLTV feed.
 
 The **Guide** button beside the search box — or `Ctrl+G` — opens the whole schedule as a grid — one row per channel, time across the top,
-whatever is on air right now highlighted and marked with a line. Click a programme for its
-description, double-click to play that channel. `◀` and `▶` (or the arrow keys) move three
+whatever is on air right now highlighted and marked with a line. Favorites come first, starred,
+as they do in the channel list. Click a programme for its description, double-click to play that
+channel. `◀` and `▶` (or the arrow keys) move three
 hours at a time, and **Now** jumps back to the present.
 
 Guide data covers about a quarter of the channel list — the playlist rarely carries the `tvg-id` needed to match a channel to the guide — so many channels simply show *No guide data for this channel*.

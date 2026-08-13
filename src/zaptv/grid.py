@@ -11,10 +11,25 @@ say where a programme belongs.
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import Protocol
 
 from .epg import Guide
 from .models import Channel, Programme
 from .search import sort_key
+
+
+class Names(Protocol):
+    """Anything that can answer "is this channel name in here".
+
+    A Protocol rather than `Container[str]`, which requires
+    `__contains__(object)`: `storage.Favorites` narrows its parameter to
+    `str` and so does not satisfy it. This matches what Favorites actually
+    offers, and a plain set of names satisfies it too — the same reason
+    `logos.LogoSource` is a Protocol rather than the concrete store.
+    """
+
+    def __contains__(self, name: str) -> bool: ...
+
 
 #: How much of the schedule one screenful shows.
 DEFAULT_SPAN = timedelta(hours=3)
@@ -47,8 +62,12 @@ class Row:
     blocks: list[Block] = field(default_factory=list)
 
 
-def visible_channels(guide: Guide, channels: list[Channel]) -> list[Channel]:
-    """Channels with guide data: alphabetical, one row per XMLTV id.
+def visible_channels(
+    guide: Guide,
+    channels: list[Channel],
+    favorites: "Names | None" = None,
+) -> list[Channel]:
+    """Channels with guide data: favorites first, then alphabetical.
 
     Only about a quarter of the playlist carries a usable tvg-id, so most
     channels have no row at all. That is the normal case, not an error.
@@ -58,10 +77,22 @@ def visible_channels(guide: Guide, channels: list[Channel]) -> list[Channel]:
     among them. Each copy would otherwise draw an identical row, so the first
     name alphabetically wins, which in practice is the plain one rather than
     the GEO, SD or EN variant.
+
+    Favorites float to the top as they do in the channel list, but unlike it
+    they appear **once**. The list repeats a favorite under its group because
+    it is grouped and the channel belongs in both places; the grid has no
+    groups, so a second copy would just be the same schedule twice — which
+    is exactly what deduplicating by tvg-id exists to prevent.
     """
+    favorites = favorites if favorites is not None else frozenset()
+
+    def order(channel: Channel) -> tuple[bool, str, str]:
+        # False sorts before True, so "not favorite" puts favorites first.
+        return (channel.name not in favorites, *sort_key(channel))
+
     seen: set[str] = set()
     rows: list[Channel] = []
-    for channel in sorted(channels, key=sort_key):
+    for channel in sorted(channels, key=order):
         channel_id = channel.tvg_id
         if not channel_id or not guide.has(channel_id) or channel_id in seen:
             continue
@@ -75,6 +106,7 @@ def build(
     channels: list[Channel],
     start: datetime,
     end: datetime,
+    favorites: "Names | None" = None,
 ) -> list[Row]:
     """Position every visible channel's programmes across [start, end).
 
@@ -88,7 +120,7 @@ def build(
         return []
 
     rows: list[Row] = []
-    for channel in visible_channels(guide, channels):
+    for channel in visible_channels(guide, channels, favorites):
         programmes = guide.between(channel.tvg_id, start, end)
         blocks: list[Block] = []
         for index, programme in enumerate(programmes):

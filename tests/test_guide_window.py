@@ -390,3 +390,65 @@ def test_the_guide_button_is_themed_in_dark_mode():
         assert style.lookup("Zap.TButton", "foreground") == dark.fg
     finally:
         root.destroy()
+
+
+def test_favorites_are_first_and_starred_in_the_grid():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv import theme, ui
+
+    channels, guide = _fixture()
+    root = tk.Tk()
+    try:
+        window = ui.GuideWindow(
+            root, guide, channels, theme.get("light"), lambda _c: None,
+            favorites={"Uno"}, now=NOW,
+        )
+        root.update()
+
+        # Alphabetically "Dos" precedes "Uno"; favoriting reverses that.
+        assert [r.channel.name for r in window._rows] == ["Uno", "Dos"]
+
+        labels = [
+            window.names.itemcget(item, "text")
+            for item in window.names.find_withtag("all")
+        ]
+        assert any(label.startswith("★") and "Uno" in label for label in labels)
+        assert not any(label.startswith("★") and "Dos" in label for label in labels)
+    finally:
+        root.destroy()
+
+
+def test_the_browser_hands_its_favorites_to_the_guide():
+    """Opening the guide must reflect the favorites the list is showing."""
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv import ui
+    from zaptv.player import VLCPlayer
+    from zaptv.storage import Favorites, Recent
+
+    channels, guide = _fixture()
+    root = tk.Tk()
+    try:
+        browser = ui.ChannelBrowser(
+            root, channels, VLCPlayer(), Favorites(["Uno"]), Recent([]), guide
+        )
+        browser.pack(fill=tk.BOTH, expand=True)
+        root.update()
+
+        browser.open_guide()
+        root.update()
+        opened = [w for w in browser.winfo_children() if isinstance(w, ui.GuideWindow)]
+        assert len(opened) == 1
+        window = opened[0]
+        # A statement-level assert narrows where the comprehension does not:
+        # winfo_children is typed as returning Widget, and Toplevel is not a
+        # Widget subclass in typeshed.
+        assert isinstance(window, ui.GuideWindow)
+        assert [r.channel.name for r in window._rows] == ["Uno", "Dos"]
+    finally:
+        root.destroy()

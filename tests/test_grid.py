@@ -53,6 +53,62 @@ def test_channels_whose_tvg_id_is_absent_from_the_guide_have_no_row():
     assert rows == []
 
 
+def test_favorites_come_first_then_alphabetical():
+    guide = guide_of(
+        programme("A.TV", "Show", 0, 60),
+        programme("B.TV", "Show", 0, 60),
+        programme("C.TV", "Show", 0, 60),
+    )
+    channels = [channel("Alfa", "A.TV"), channel("Beta", "B.TV"), channel("Gamma", "C.TV")]
+    rows = grid.build(guide, channels, START, END, favorites={"Gamma"})
+    assert [row.channel.name for row in rows] == ["Gamma", "Alfa", "Beta"]
+
+
+def test_several_favorites_stay_alphabetical_among_themselves():
+    guide = guide_of(
+        programme("A.TV", "Show", 0, 60),
+        programme("B.TV", "Show", 0, 60),
+        programme("C.TV", "Show", 0, 60),
+    )
+    channels = [channel("Alfa", "A.TV"), channel("Beta", "B.TV"), channel("Gamma", "C.TV")]
+    rows = grid.build(guide, channels, START, END, favorites={"Gamma", "Beta"})
+    assert [row.channel.name for row in rows] == ["Beta", "Gamma", "Alfa"]
+
+
+def test_a_favorite_appears_once_not_twice():
+    """The channel list repeats a favorite under its group; the grid has no
+    groups, so a second copy would just be the same schedule twice."""
+    guide = guide_of(programme("A.TV", "Show", 0, 60))
+    rows = grid.build(guide, [channel("Alfa", "A.TV")], START, END, favorites={"Alfa"})
+    assert [row.channel.name for row in rows] == ["Alfa"]
+
+
+def test_favoriting_a_variant_makes_it_win_the_shared_id():
+    """Teledeporte and Teledeporte GEO share an id and draw one row; the
+    favorited one is the one worth keeping."""
+    guide = guide_of(programme("TDP.TV", "Ciclismo", 0, 60))
+    channels = [channel("Teledeporte", "TDP.TV"), channel("Teledeporte GEO", "TDP.TV")]
+    rows = grid.build(guide, channels, START, END, favorites={"Teledeporte GEO"})
+    assert [row.channel.name for row in rows] == ["Teledeporte GEO"]
+
+
+def test_no_favorites_leaves_the_order_alphabetical():
+    guide = guide_of(programme("A.TV", "Show", 0, 60), programme("B.TV", "Show", 0, 60))
+    channels = [channel("Beta", "B.TV"), channel("Alfa", "A.TV")]
+    assert [r.channel.name for r in grid.build(guide, channels, START, END)] == ["Alfa", "Beta"]
+    assert [
+        r.channel.name for r in grid.build(guide, channels, START, END, favorites=set())
+    ] == ["Alfa", "Beta"]
+
+
+def test_a_favorite_without_guide_data_still_gets_no_row():
+    """Favoriting cannot conjure a schedule the feed does not carry."""
+    guide = guide_of(programme("A.TV", "Show", 0, 60))
+    channels = [channel("Alfa", "A.TV"), channel("Sin guia")]
+    rows = grid.build(guide, channels, START, END, favorites={"Sin guia"})
+    assert [row.channel.name for row in rows] == ["Alfa"]
+
+
 def test_rows_are_alphabetical_and_accent_insensitive():
     guide = guide_of(
         programme("A.TV", "Show", 0, 60),

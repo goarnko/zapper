@@ -425,6 +425,7 @@ class GuideWindow(tk.Toplevel):
         channels: list[Channel],
         palette: theme.Palette,
         on_play: Callable[[Channel], None],
+        favorites: grid.Names | None = None,
         now: datetime | None = None,
     ):
         super().__init__(master)
@@ -439,6 +440,7 @@ class GuideWindow(tk.Toplevel):
         self._channels = channels
         self._palette = palette
         self._on_play = on_play
+        self._favorites = favorites
         #: Injectable so the tests do not depend on what is on air today.
         self._now = now
         self._rows: list[grid.Row] = []
@@ -553,7 +555,9 @@ class GuideWindow(tk.Toplevel):
     # -- drawing ---------------------------------------------------------
 
     def _reload(self) -> None:
-        self._rows = grid.build(self._guide, self._channels, self._start, self._end)
+        self._rows = grid.build(
+            self._guide, self._channels, self._start, self._end, self._favorites
+        )
         local_start = self._start.astimezone()
         local_end = self._end.astimezone()
         self.window_label.config(text=f"{local_start:%a %d %b  %H:%M} – {local_end:%H:%M}")
@@ -604,10 +608,12 @@ class GuideWindow(tk.Toplevel):
 
     def _draw_row(self, index: int, row: grid.Row, width: int) -> None:
         top = index * ROW_HEIGHT
+        favorite = self._favorites is not None and row.channel.name in self._favorites
+        label = f"{_STAR} {row.channel.name}" if favorite else row.channel.name
         self.names.create_text(
             4,
             top + ROW_HEIGHT / 2,
-            text=self._fit(row.channel.name, GRID_NAME_WIDTH - 8),
+            text=self._fit(label, GRID_NAME_WIDTH - 8),
             anchor="w",
             fill=self._palette.fg,
             font=self._font,
@@ -1171,6 +1177,7 @@ class ChannelBrowser(tk.Frame):
             self._channels,
             self._palette,
             lambda channel: self._play(channel, self._player_for(channel)),
+            self._favorites,
         )
         return "break"
 
