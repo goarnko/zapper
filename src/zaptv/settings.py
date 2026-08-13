@@ -31,6 +31,10 @@ class Settings:
     #: appear there (group names uppercased). Absent means expanded, so a
     #: settings file from an older version opens everything as before.
     collapsed_groups: list[str] = field(default_factory=list)
+    #: The same for the guide grid, kept separate on purpose: the list is for
+    #: launching a channel quickly and the guide for seeing what is on, so
+    #: folding the list down should not quietly empty the guide.
+    collapsed_guide_groups: list[str] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path | None = None) -> "Settings":
@@ -51,15 +55,16 @@ class Settings:
         known = {f.name for f in fields(cls)}
         kept = {k: v for k, v in data.items() if k in known}
 
-        # The only field whose wrong type fails quietly rather than loudly:
+        # The only fields whose wrong type fails quietly rather than loudly:
         # a string here would iterate as characters and "collapse" groups
         # named "A", "n", "d"... Anything that is not a list of strings is
         # dropped back to the default.
-        groups = kept.get("collapsed_groups")
-        if groups is not None and not (
-            isinstance(groups, list) and all(isinstance(g, str) for g in groups)
-        ):
-            del kept["collapsed_groups"]
+        for name in ("collapsed_groups", "collapsed_guide_groups"):
+            value = kept.get(name)
+            if value is not None and not (
+                isinstance(value, list) and all(isinstance(g, str) for g in value)
+            ):
+                del kept[name]
 
         return cls(**kept)
 

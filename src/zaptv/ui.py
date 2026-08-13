@@ -50,6 +50,8 @@ GRID_NAME_WIDTH = 150
 GRID_RULER_HEIGHT = 22
 #: Breathing room between a block's edge and its title.
 GRID_BLOCK_PAD = 4
+#: How far channel names sit inside their section heading.
+GRID_INDENT = 16
 
 
 def format_slot(programme: Programme | None) -> str:
@@ -426,6 +428,7 @@ class GuideWindow(tk.Toplevel):
         palette: theme.Palette,
         on_play: Callable[[Channel], None],
         favorites: grid.Names | None = None,
+        config: Settings | None = None,
         now: datetime | None = None,
     ):
         super().__init__(master)
@@ -443,7 +446,14 @@ class GuideWindow(tk.Toplevel):
         self._favorites = favorites
         #: Injectable so the tests do not depend on what is on air today.
         self._now = now
-        self._rows: list[grid.Row] = []
+        self._sections: list[grid.Section] = []
+        #: Flattened sections in drawing order — index is the y position.
+        self._lines: list[grid.Line] = []
+        #: The guide keeps its own collapsed set, deliberately separate
+        #: from the channel list's: folding the list down to launch
+        #: quickly should not empty the window you open to see what is on.
+        self._config = config
+        self._collapsed: set[str] = set(config.collapsed_guide_groups) if config else set()
         self._span = grid.DEFAULT_SPAN
         self._start = self._floor(self._clock())
 
@@ -543,6 +553,7 @@ class GuideWindow(tk.Toplevel):
 
         self.slots.bind("<Configure>", lambda _e: self._draw())
         self.slots.bind("<Button-1>", self._on_click)
+        self.names.bind("<Button-1>", self._toggle_section)
         self.slots.bind("<Double-Button-1>", self._on_activate)
         for canvas in (self.slots, self.names):
             # X11 reports the wheel as buttons 4 and 5, not <MouseWheel>.
@@ -632,13 +643,17 @@ class GuideWindow(tk.Toplevel):
 
     def _reload(self) -> None:
         query = self.query.get()
-        self._rows = grid.build(
+        # A filter forces every section open, exactly as the channel list
+        # does: matches hidden inside folded groups read as a failed search.
+        self._sections = grid.build(
             self._guide,
             search.filter_channels(self._channels, query),
             self._start,
             self._end,
             self._favorites,
+            frozenset() if query.strip() else self._collapsed,
         )
+        self._lines = grid.lines(self._sections)
         local_start = self._start.astimezone()
         local_end = self._end.astimezone()
         self.window_label.config(text=f"{local_start:%a %d %b  %H:%M} – {local_end:%H:%M}")
@@ -646,7 +661,8 @@ class GuideWindow(tk.Toplevel):
             # Against the number of rows there could be, not the whole
             # playlist: "3 of 482" would suggest the filter had thrown away
             # channels that never had guide data to begin with.
-            self.footer.config(text=f"{len(self._rows)} of {self._total} channels match")
+            shown = sum(len(s.rows) for s in self._sections)
+            self.footer.config(text=f"{shown} of {self._total} channels match")
         else:
             self.footer.config(
                 text=f"{self._total} of {len(self._channels)} channels have guide data"
@@ -665,8 +681,8 @@ class GuideWindow(tk.Toplevel):
         self.ruler.delete(tk.ALL)
 
         self._draw_ruler(width)
-        for index, row in enumerate(self._rows):
-            self._draw_row(index, row, width)
+        for index, line in enumerate(self._lines):
+            self._draw_line(index, line, width)
         self._draw_now_line(width)
 
         height = self._height()
@@ -693,14 +709,48 @@ class GuideWindow(tk.Toplevel):
                 )
             marker += timedelta(minutes=30)
 
+    def _draw_line(self, index: int, line: grid.Line, width: int) -> None:
+        if line.is_header:
+            self._draw_header(index, line.section, width)
+            return
+        assert line.row is not None
+        self._draw_row(index, line.row, width)
+
+    def _draw_header(self, index: int, section: grid.Section, width: int) -> None:
+        """A collapsible section heading, spanning both canvases.
+
+        The band across the grid is what makes the header feel like one row
+        rather than a label floating over the previous channel's programmes,
+        and it doubles as the click target on that side.
+        """
+        top = index * ROW_HEIGHT
+        arrow = "▶" if section.collapsed else "▼"
+        count = len(section.rows)
+        self.names.create_rectangle(
+            0, top, GRID_NAME_WIDTH, top + ROW_HEIGHT,
+            fill=self._palette.bg, outline="",
+        )
+        self.names.create_text(
+            4,
+            top + ROW_HEIGHT / 2,
+            text=self._fit(f"{arrow} {section.label} ({count})", GRID_NAME_WIDTH - 8),
+            anchor="w",
+            fill=self._palette.muted,
+            font=self._font,
+        )
+        self.slots.create_rectangle(
+            0, top, width, top + ROW_HEIGHT,
+            fill=self._palette.bg, outline="",
+        )
+
     def _draw_row(self, index: int, row: grid.Row, width: int) -> None:
         top = index * ROW_HEIGHT
         favorite = self._favorites is not None and row.channel.name in self._favorites
         label = f"{_STAR} {row.channel.name}" if favorite else row.channel.name
         self.names.create_text(
-            4,
+            GRID_INDENT,
             top + ROW_HEIGHT / 2,
-            text=self._fit(label, GRID_NAME_WIDTH - 8),
+            text=self._fit(label, GRID_NAME_WIDTH - GRID_INDENT - 4),
             anchor="w",
             fill=self._palette.fg,
             font=self._font,
@@ -772,7 +822,7 @@ class GuideWindow(tk.Toplevel):
 
     def _height(self) -> int:
         """Scrollable height, which is also what _draw sets as the region."""
-        return max(len(self._rows) * ROW_HEIGHT, 1)
+        return max(len(self._lines) * ROW_HEIGHT, 1)
 
     def _canvas_y(self, event: "tk.Event[tk.Canvas]") -> float:
         """Pointer y in canvas coordinates rather than widget coordinates.
@@ -789,20 +839,63 @@ class GuideWindow(tk.Toplevel):
         """
         return event.y + self.slots.yview()[0] * self._height()
 
+    @property
+    def rows(self) -> list[grid.Row]:
+        """Channel rows currently drawn, without the section headings."""
+        return [line.row for line in self._lines if line.row is not None]
+
+    def _line_at(self, event: "tk.Event[tk.Canvas]") -> grid.Line | None:
+        index = int(self._canvas_y(event) // ROW_HEIGHT)
+        if not 0 <= index < len(self._lines):
+            return None
+        return self._lines[index]
+
     def _at(self, event: "tk.Event[tk.Canvas]") -> tuple[Channel, Programme] | None:
         """The channel and programme under the pointer, if any."""
         width = self.slots.winfo_width()
-        index = int(self._canvas_y(event) // ROW_HEIGHT)
-        if not 0 <= index < len(self._rows) or width <= 1:
+        line = self._line_at(event)
+        if line is None or line.row is None or width <= 1:
             return None
-        row = self._rows[index]
         frac = event.x / width
-        for block in row.blocks:
+        for block in line.row.blocks:
             if block.start_frac <= frac < block.end_frac:
-                return row.channel, block.programme
+                return line.row.channel, block.programme
         return None
 
+    def _toggle_section(self, event: "tk.Event[tk.Canvas]") -> str:
+        """Fold or unfold the section whose header was clicked.
+
+        Both canvases route here, so the heading works whether it is clicked
+        on the channel-name side or the band across the grid.
+        """
+        line = self._line_at(event)
+        if line is None or not line.is_header:
+            return ""
+        label = line.section.label
+        if label in self._collapsed:
+            self._collapsed.discard(label)
+        else:
+            self._collapsed.add(label)
+        self._save_collapsed()
+        self._reload()
+        return "break"
+
+    def _save_collapsed(self) -> None:
+        """Remember the fold state, unless a filter is forcing sections open.
+
+        While filtering, every section is drawn open regardless; recording a
+        toggle made in that state would rewrite the user's real choice.
+        """
+        if self._config is None or self.query.get().strip():
+            return
+        self._config.collapsed_guide_groups = sorted(self._collapsed)
+        self._config.save()
+
     def _on_click(self, event: "tk.Event[tk.Canvas]") -> str:
+        line = self._line_at(event)
+        if line is not None and line.is_header:
+            return self._toggle_section(event)
+
         found = self._at(event)
         if found is None:
             return "break"
@@ -1353,6 +1446,7 @@ class ChannelBrowser(tk.Frame):
             self._palette,
             lambda channel: self._play(channel, self._player_for(channel)),
             self._favorites,
+            self._config,
         )
         return "break"
 

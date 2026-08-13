@@ -88,7 +88,7 @@ def test_only_channels_with_guide_data_get_a_row():
     try:
         window = _window(root)
         root.update()
-        assert [row.channel.name for row in window._rows] == ["Dos", "Uno"]
+        assert [row.channel.name for row in window.rows] == ["Dos", "Uno"]
         # The channel with no tvg-id is still counted in the footer, so the
         # user can see why their channel is missing rather than guessing.
         assert "2 of 3 channels" in window.footer.cget("text")
@@ -158,6 +158,8 @@ def test_a_double_click_on_a_block_plays_that_channel():
         return
     import tkinter as tk
 
+    from zaptv import ui
+
     played: list[Channel] = []
     root = tk.Tk()
     try:
@@ -170,7 +172,8 @@ def test_a_double_click_on_a_block_plays_that_channel():
         # alphabetical, so row 0 is "Dos", whose two-hour programme covers
         # that point.
         event.x = window.slots.winfo_width() // 3
-        event.y = 5
+        # Line 0 is the section heading now, so the first channel is one down.
+        event.y = ui.ROW_HEIGHT + 5
         window._on_activate(event)
 
         assert [c.name for c in played] == ["Dos"]
@@ -258,6 +261,8 @@ def test_clicking_a_block_shows_its_details():
         return
     import tkinter as tk
 
+    from zaptv import ui
+
     root = tk.Tk()
     try:
         window = _window(root)
@@ -266,7 +271,8 @@ def test_clicking_a_block_shows_its_details():
 
         event = tk.Event()
         event.x = window.slots.winfo_width() // 3
-        event.y = 5
+        # Line 0 is the section heading now, so the first channel is one down.
+        event.y = ui.ROW_HEIGHT + 5
         window._on_click(event)
 
         assert "Ahora en Dos" in window.detail.cget("text")
@@ -293,7 +299,7 @@ def test_an_empty_guide_draws_an_empty_grid_rather_than_failing():
             now=NOW,
         )
         root.update()
-        assert window._rows == []
+        assert window.rows == []
         assert "0 of 3 channels" in window.footer.cget("text")
     finally:
         root.destroy()
@@ -409,11 +415,13 @@ def test_favorites_are_first_and_starred_in_the_grid():
         root.update()
 
         # Alphabetically "Dos" precedes "Uno"; favoriting reverses that.
-        assert [r.channel.name for r in window._rows] == ["Uno", "Dos"]
+        assert [r.channel.name for r in window.rows] == ["Uno", "Dos"]
 
         labels = [
             window.names.itemcget(item, "text")
             for item in window.names.find_withtag("all")
+            # typeshed says Canvas.type returns int | None; it returns a name.
+            if str(window.names.type(item)) == "text"
         ]
         assert any(label.startswith("★") and "Uno" in label for label in labels)
         assert not any(label.startswith("★") and "Dos" in label for label in labels)
@@ -449,7 +457,7 @@ def test_the_browser_hands_its_favorites_to_the_guide():
         # winfo_children is typed as returning Widget, and Toplevel is not a
         # Widget subclass in typeshed.
         assert isinstance(window, ui.GuideWindow)
-        assert [r.channel.name for r in window._rows] == ["Uno", "Dos"]
+        assert [r.channel.name for r in window.rows] == ["Uno", "Dos"]
     finally:
         root.destroy()
 
@@ -466,15 +474,15 @@ def test_the_filter_narrows_the_rows():
     try:
         window = _window(root)
         root.update()
-        assert [r.channel.name for r in window._rows] == ["Dos", "Uno"]
+        assert [r.channel.name for r in window.rows] == ["Dos", "Uno"]
 
         window.query.set("uno")
         root.update()
-        assert [r.channel.name for r in window._rows] == ["Uno"]
+        assert [r.channel.name for r in window.rows] == ["Uno"]
 
         window.query.set("")
         root.update()
-        assert [r.channel.name for r in window._rows] == ["Dos", "Uno"]
+        assert [r.channel.name for r in window.rows] == ["Dos", "Uno"]
     finally:
         root.destroy()
 
@@ -500,7 +508,7 @@ def test_the_filter_ignores_accents_like_the_channel_list():
         root.update()
         window.query.set("malaga")
         root.update()
-        assert [r.channel.name for r in window._rows] == ["Málaga TV"]
+        assert [r.channel.name for r in window.rows] == ["Málaga TV"]
     finally:
         root.destroy()
 
@@ -623,5 +631,179 @@ def test_the_paging_buttons_work_regardless_of_filter_focus():
         opening = window._start
         window._page_back()
         assert window._start == opening - grid.PAGE_STEP
+    finally:
+        root.destroy()
+
+
+# -- collapsible sections ------------------------------------------------
+
+
+def _grouped_window(root, config=None, favorites=None):
+    from zaptv import theme, ui
+    from zaptv.epg import Guide
+
+    channels = [
+        Channel(name="Alfa", group="Uno", streams=["https://x"], tvg_id="A.TV"),
+        Channel(name="Beta", group="Dos", streams=["https://x"], tvg_id="B.TV"),
+    ]
+    guide = Guide(
+        {
+            "A.TV": [_programme("A.TV", "En Alfa", 0, 120)],
+            "B.TV": [_programme("B.TV", "En Beta", 0, 120)],
+        }
+    )
+    return ui.GuideWindow(
+        root, guide, channels, theme.get("light"), lambda _c: None,
+        favorites=favorites, config=config, now=NOW,
+    )
+
+
+def _header_y(window, label):
+    from zaptv import ui
+
+    for index, line in enumerate(window._lines):
+        if line.is_header and line.section.label == label:
+            return index * ui.ROW_HEIGHT + 5
+    raise AssertionError(f"no header {label!r}")
+
+
+def test_the_guide_groups_channels_into_sections():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        window = _grouped_window(root)
+        root.update()
+        assert [s.label for s in window._sections] == ["DOS", "UNO"]
+    finally:
+        root.destroy()
+
+
+def test_clicking_a_heading_collapses_and_expands_it():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    root = tk.Tk()
+    try:
+        window = _grouped_window(root)
+        window.geometry("900x560")
+        root.update()
+        assert [r.channel.name for r in window.rows] == ["Beta", "Alfa"]
+
+        event: tk.Event[tk.Canvas] = tk.Event()
+        event.x = 10
+        event.y = _header_y(window, "UNO")
+        window._toggle_section(event)
+        root.update()
+        assert [r.channel.name for r in window.rows] == ["Beta"]
+
+        event.y = _header_y(window, "UNO")
+        window._toggle_section(event)
+        root.update()
+        assert [r.channel.name for r in window.rows] == ["Beta", "Alfa"]
+    finally:
+        root.destroy()
+
+
+def test_folding_the_guide_is_saved_separately_from_the_channel_list():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv.settings import Settings
+
+    root = tk.Tk()
+    try:
+        config = Settings(collapsed_groups=["ANDALUCÍA"])
+        window = _grouped_window(root, config)
+        window.geometry("900x560")
+        root.update()
+
+        event: tk.Event[tk.Canvas] = tk.Event()
+        event.x = 10
+        event.y = _header_y(window, "UNO")
+        window._toggle_section(event)
+
+        assert config.collapsed_guide_groups == ["UNO"]
+        # The channel list's own set is untouched.
+        assert config.collapsed_groups == ["ANDALUCÍA"]
+    finally:
+        root.destroy()
+
+
+def test_a_collapsed_guide_section_starts_folded():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv.settings import Settings
+
+    root = tk.Tk()
+    try:
+        window = _grouped_window(root, Settings(collapsed_guide_groups=["UNO"]))
+        root.update()
+        assert [r.channel.name for r in window.rows] == ["Beta"]
+        by_label = {s.label: s for s in window._sections}
+        assert by_label["UNO"].collapsed
+    finally:
+        root.destroy()
+
+
+def test_filtering_opens_folded_sections_without_saving_that():
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv.settings import Settings
+
+    root = tk.Tk()
+    try:
+        config = Settings(collapsed_guide_groups=["UNO"])
+        window = _grouped_window(root, config)
+        root.update()
+        assert [r.channel.name for r in window.rows] == ["Beta"]
+
+        window.query.set("alfa")
+        root.update()
+        # The match lives in the folded section; hiding it looks like a
+        # failed search.
+        assert [r.channel.name for r in window.rows] == ["Alfa"]
+        assert config.collapsed_guide_groups == ["UNO"]
+
+        window.query.set("")
+        root.update()
+        assert [r.channel.name for r in window.rows] == ["Beta"]
+    finally:
+        root.destroy()
+
+
+def test_a_heading_click_never_plays_a_channel():
+    """The heading sits where a programme block would be on the grid side."""
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    played: list[Channel] = []
+    root = tk.Tk()
+    try:
+        from zaptv import theme, ui
+        from zaptv.epg import Guide
+
+        channels = [Channel(name="Alfa", group="Uno", streams=["https://x"], tvg_id="A.TV")]
+        guide = Guide({"A.TV": [_programme("A.TV", "En Alfa", 0, 120)]})
+        window = ui.GuideWindow(
+            root, guide, channels, theme.get("light"), played.append, now=NOW
+        )
+        window.geometry("900x560")
+        root.update()
+
+        event: tk.Event[tk.Canvas] = tk.Event()
+        event.x = window.slots.winfo_width() // 2
+        event.y = _header_y(window, "UNO")
+        window._on_activate(event)
+        assert played == []
     finally:
         root.destroy()

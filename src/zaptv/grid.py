@@ -15,7 +15,10 @@ from typing import Protocol
 
 from .epg import Guide
 from .models import Channel, Programme
-from .search import sort_key
+from .search import normalize, sort_key
+
+#: Section heading for favorited channels, matching the channel list.
+FAVORITES_LABEL = "★ FAVORITES"
 
 
 class Names(Protocol):
@@ -60,6 +63,42 @@ class Row:
 
     channel: Channel
     blocks: list[Block] = field(default_factory=list)
+
+
+@dataclass
+class Section:
+    """A collapsible band of rows: favorites, or one channel group."""
+
+    label: str
+    rows: list[Row] = field(default_factory=list)
+    collapsed: bool = False
+
+
+@dataclass
+class Line:
+    """One drawn line of the grid, top to bottom.
+
+    Either a section header (`row is None`) or a channel inside it. Flattening
+    the sections here rather than in the UI keeps the index-to-content mapping
+    — which is what hit testing needs — testable without a display.
+    """
+
+    section: Section
+    row: Row | None = None
+
+    @property
+    def is_header(self) -> bool:
+        return self.row is None
+
+
+def lines(sections: list[Section]) -> list[Line]:
+    """Header, then rows for each expanded section, in drawing order."""
+    out: list[Line] = []
+    for section in sections:
+        out.append(Line(section))
+        if not section.collapsed:
+            out.extend(Line(section, row) for row in section.rows)
+    return out
 
 
 def visible_channels(
@@ -107,8 +146,14 @@ def build(
     start: datetime,
     end: datetime,
     favorites: "Names | None" = None,
-) -> list[Row]:
-    """Position every visible channel's programmes across [start, end).
+    collapsed: "Names | None" = None,
+) -> list[Section]:
+    """Group the visible channels and position their programmes.
+
+    Sections mirror the channel list: favorites first, then one per group in
+    alphabetical order. A favorite appears **only** under FAVORITES and not
+    again in its group — the list can afford that duplication because its
+    rows are one line each, but here it would draw the same schedule twice.
 
     A channel with guide data but nothing scheduled in this window still gets
     an empty row: dropping it would make the rows reflow as the user pages
@@ -119,30 +164,53 @@ def build(
     if span <= 0:
         return []
 
-    rows: list[Row] = []
-    for channel in visible_channels(guide, channels, favorites):
-        programmes = guide.between(channel.tvg_id, start, end)
-        blocks: list[Block] = []
-        for index, programme in enumerate(programmes):
-            stop = programme.end
-            if stop is None:
-                # XMLTV allows no stop time: the programme runs until the next
-                # one starts, or to the window edge when it is the last.
-                following = programmes[index + 1] if index + 1 < len(programmes) else None
-                stop = following.start if following is not None else end
+    favorites = favorites if favorites is not None else frozenset()
+    collapsed = collapsed if collapsed is not None else frozenset()
 
-            left = (programme.start - start).total_seconds() / span
-            right = (stop - start).total_seconds() / span
-            block = Block(
-                programme=programme,
-                start_frac=max(left, 0.0),
-                end_frac=min(right, 1.0),
-                clipped_left=left < 0.0,
-                clipped_right=right > 1.0,
-            )
-            # A programme ending exactly as the window opens has nothing to
-            # draw; it would be an invisible click target.
-            if block.width_frac > 0:
-                blocks.append(block)
-        rows.append(Row(channel=channel, blocks=blocks))
-    return rows
+    grouped: dict[str, list[Row]] = {}
+    starred: list[Row] = []
+    for channel in visible_channels(guide, channels, favorites):
+        row = _row_for(guide, channel, start, end, span)
+        if channel.name in favorites:
+            starred.append(row)
+        else:
+            grouped.setdefault(channel.group.upper(), []).append(row)
+
+    sections = []
+    if starred:
+        sections.append(
+            Section(FAVORITES_LABEL, starred, FAVORITES_LABEL in collapsed)
+        )
+    for label in sorted(grouped, key=normalize):
+        sections.append(Section(label, grouped[label], label in collapsed))
+    return sections
+
+
+def _row_for(
+    guide: Guide, channel: Channel, start: datetime, end: datetime, span: float
+) -> Row:
+    """Lay one channel's programmes out across the window."""
+    programmes = guide.between(channel.tvg_id, start, end)
+    blocks: list[Block] = []
+    for index, programme in enumerate(programmes):
+        stop = programme.end
+        if stop is None:
+            # XMLTV allows no stop time: the programme runs until the next
+            # one starts, or to the window edge when it is the last.
+            following = programmes[index + 1] if index + 1 < len(programmes) else None
+            stop = following.start if following is not None else end
+
+        left = (programme.start - start).total_seconds() / span
+        right = (stop - start).total_seconds() / span
+        block = Block(
+            programme=programme,
+            start_frac=max(left, 0.0),
+            end_frac=min(right, 1.0),
+            clipped_left=left < 0.0,
+            clipped_right=right > 1.0,
+        )
+        # A programme ending exactly as the window opens has nothing to
+        # draw; it would be an invisible click target.
+        if block.width_frac > 0:
+            blocks.append(block)
+    return Row(channel=channel, blocks=blocks)
