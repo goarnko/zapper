@@ -111,6 +111,35 @@ class Guide:
         following = items[index + 1] if index + 1 < len(items) else None
         return current, following
 
+    def between(self, channel: str | None, start: datetime, end: datetime) -> list[Programme]:
+        """Programmes overlapping [start, end), ordered by start.
+
+        A programme that began before `start` but is still running is
+        included: on the grid it occupies the left edge rather than being
+        missing, which is why this steps back one from the bisect rather than
+        taking everything at or after `start`.
+        """
+        if not self.has(channel):
+            return []
+        assert channel is not None
+
+        items = self._by_channel[channel]
+        starts = self._starts[channel]
+        first = max(bisect_right(starts, start) - 1, 0)
+
+        found: list[Programme] = []
+        for index in range(first, len(items)):
+            programme = items[index]
+            if programme.start >= end:
+                break
+            stop = programme.end
+            if stop is None:
+                # No stop time: runs until the next programme, or off the end.
+                stop = items[index + 1].start if index + 1 < len(items) else end
+            if stop > start:
+                found.append(programme)
+        return found
+
     def upcoming(
         self, channel: str | None, at: datetime | None = None, limit: int = 5
     ) -> list[Programme]:

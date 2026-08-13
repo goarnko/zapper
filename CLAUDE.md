@@ -78,7 +78,19 @@ The list is a **`ttk.Treeview`**, not a `Listbox` — only Treeview supports a p
 
 Theming lives in `theme.py`. ttk ignores widget-level colour options, so the Treeview and the settings dialog need configured *styles* (`style_dialog`), and the `clam` theme is used because the default Linux ttk theme ignores Treeview background settings entirely.
 
-Shortcuts follow `SPEC.md`: Enter plays, `Ctrl+F` focuses search, `F` favorites, `Ctrl+R` forces a playlist and guide update, `Esc` clears the search, `Ctrl+,` opens settings, `Ctrl+P` opens the playlist sources window. **`Esc` no longer quits** — `Ctrl+Q` does.
+Shortcuts follow `SPEC.md`: Enter plays, `Ctrl+F` focuses search, `F` favorites, `Ctrl+R` forces a playlist and guide update, `Esc` clears the search, `Ctrl+,` opens settings, `Ctrl+P` opens the playlist sources window, `Ctrl+G` opens the guide grid. **`Esc` no longer quits** — `Ctrl+Q` does.
+
+## The guide grid
+
+`Ctrl+G` opens `GuideWindow`: the whole schedule at once, one row per channel. It is a view over the `Guide` already loaded in `ChannelBrowser` — it downloads nothing, caches nothing and touches no parsing.
+
+- **`grid.py` holds the layout, `ui.py` only draws it**, the same split `search.py` makes for matching. `grid.build` returns positions as **fractions of the visible window**, never pixels, so the canvas width is the UI's business and every layout test is arithmetic with no display.
+- **Time is paged, not scrolled horizontally.** `◀`/`▶` move an hour; the window spans three. This is why only the visible window is ever drawn — measured at ~1,060 canvas items against the 11,180 programmes the feed carries. It also means the canvas never scrolls in x, so click handling uses `event.x` directly and needs `canvasy` only for y.
+- **A tvg-id shared by several channels must draw one row, not several.** 15 ids in the live playlist are shared — `Teledeporte`/`Teledeporte GEO`, three copies of `3CatInfo`, `EnerGeek Retro HD`/`SD` — and each copy would otherwise repeat an identical row. `visible_channels` keeps the alphabetically first name, which in every sampled case is the plain one rather than the GEO, SD or EN variant.
+- **A channel with guide data but nothing in the current window keeps an empty row.** Dropping it would reflow the rows as the user pages through time, and a grid whose channels move under the pointer is worse than one with a gap.
+- Two canvases (names, slots) share one scrollbar through `_yview`; only `slots` reports back to the scrollbar, or the two feed each other. The names column sits under a blank spacer the height of the ruler so the labels stay level with their rows.
+- `Guide.between` is the query behind it: programmes *overlapping* a window, stepping back one from the bisect so the programme already on air occupies the left edge instead of vanishing.
+- Tk's stubs leave `Canvas.canvasy` untyped, so `_canvas_y` carries the one `type: ignore[no-untyped-call]` in the file.
 
 ## Providers
 
@@ -115,7 +127,7 @@ All three pass; keep them passing.
   - `tests/` is a package (`tests/__init__.py`) purely so the mypy override can name `tests.*`; mypy rejects partial-component patterns like `test_*`.
   - **Local mypy is weaker than CI here.** This machine's apt `python3-pil` has no `py.typed`, so the override makes mypy skip PIL analysis entirely; CI installs Pillow from pip, which *does* ship type information, and checks every PIL call. A green local mypy is therefore not proof — CI caught two real errors in `logos.convert` this way (`convert()` returns `Image`, not `ImageFile`, and `Image.LANCZOS` is a legacy alias the stubs do not declare; use `Image.Resampling.LANCZOS`). To reproduce CI locally, unzip a Pillow wheel and point `MYPYPATH` at it, then read only the `src/`- and `tests/`-prefixed errors.
   - `logos.LogoSource` is a `Protocol` covering just `path_for`/`drain`. `ChannelBrowser` takes that rather than `LogoStore`, so test doubles satisfy it structurally instead of needing a cast.
-- **pytest** — 160 unit tests, plus 5 integration tests that are **off unless `ZAPTV_INTEGRATION=1`**. Those hit the live feeds and assert loose bounds (≥250 channels, ≥1000 programmes, playlist and guide still share tvg-ids, broadcaster pages still 200). They exist to catch the feed changing shape, which no unit test can. CI runs them weekly and on demand, never on a PR.
+- **pytest** — 189 unit tests, plus 5 integration tests that are **off unless `ZAPTV_INTEGRATION=1`**. (Those five gate with `if not ENABLED: return` inside each body rather than a skip marker, so a normal run reports 194 passed and no skips — they are off, but the count gives no sign of it.) Those hit the live feeds and assert loose bounds (≥250 channels, ≥1000 programmes, playlist and guide still share tvg-ids, broadcaster pages still 200). They exist to catch the feed changing shape, which no unit test can. CI runs them weekly and on demand, never on a PR.
 
 **Tests must not depend on what is installed.** Anything touching a player patches `shutil.which` rather than assuming VLC or `xdg-open` exists — CI runners have neither. To check, run the suite with `shutil.which` stubbed to return `None` for `vlc`, `mpv` and `xdg-open`.
 
@@ -168,7 +180,7 @@ Verified against the live TDTChannels list — these shaped the parser and will 
 
 The XMLTV feed is well-formed — all timestamps 14-digit and `+0000`, no missing stop times or titles, ~11k programmes over ~3.5 days, 52 ms to parse — so the parser's tolerance is about surviving a bad *download*, not bad data.
 
-The coverage gap is the thing to design around: **only 126 of 471 channels have guide data** (~27%). The playlist mostly lacks `tvg-id`, which is the only join key. So "no guide" is the *majority* case and is rendered as a quiet line in the pane, never an error. Every `Guide` lookup returns `None`/empty rather than raising, and a missing or corrupt cache yields an empty `Guide`.
+The coverage gap is the thing to design around: **only 115 of 482 channels have guide data** (~24%; it was 126 of 471 when this was first measured — the feeds drift, so re-measure rather than trusting the figure). The playlist mostly lacks `tvg-id`, which is the only join key. So "no guide" is the *majority* case and is rendered as a quiet line in the pane, never an error. Every `Guide` lookup returns `None`/empty rather than raising, and a missing or corrupt cache yields an empty `Guide`.
 
 61 XMLTV channel ids have programmes but no playlist channel — Atresmedia and Mediaset (`Cuatro.TV`, `Telecinco.TV`, `Bemad.TV`, …) among them. They have guide data but no stream, because those broadcasters gate live playback behind their own platforms (Atresplayer, Mitele). This is a known gap, scheduled under **Milestone 5**, and it is not a parser bug — don't try to fix it in `playlist.py`.
 
@@ -217,4 +229,4 @@ DISPLAY=:0 xwininfo -root -tree | grep '"Tk")'    # find the window id (field 1)
 DISPLAY=:0 xwd -id <id> -silent -out win.xwd      # capture that window, not the root
 ```
 
-`xwd` output needs converting — PIL is available but has no XWD reader, so parse the 100-byte big-endian header and build the image from `raw`/`BGRX`. Beware: `grep -oP '0x[0-9a-f]+'` on the `xwininfo` line matches `0x640` inside the geometry `420x640`; take field 1 instead. Multiple instances appear as `("tk" "Tk")`, `("tk #2" "Tk")`.
+`xwd` output needs converting — PIL is available but has no XWD reader, so parse the big-endian header and build the image from `raw`/`BGRX`. Two traps in that header, both of which produced `cannot decode image data` here: the field list has **`bits_per_pixel` between `bitmap_pad` and `bytes_per_line`**, so counting fields by eye puts every later index one out (`bytes_per_line` is `h[12]`, `ncolors` is `h[19]`); and **`header_size` is not 100** — the window name is appended to it, so a "ZapTV Guide" capture reports 112. Pixel data starts at `header_size + ncolors * 12`; check that against the file length before decoding. Beware: `grep -oP '0x[0-9a-f]+'` on the `xwininfo` line matches `0x640` inside the geometry `420x640`; take field 1 instead. Multiple instances appear as `("tk" "Tk")`, `("tk #2" "Tk")`.

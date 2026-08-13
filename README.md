@@ -56,6 +56,7 @@ Add `--search <query>` to filter the TSV output, `--now` to print what is on air
 | `Ctrl+F` | Jump to the search box |
 | `F` | Favorite / unfavorite |
 | `Ctrl+R` | Update the playlist and guide now |
+| `Ctrl+G` | Open the full guide grid |
 | `Ctrl+,` | Open settings |
 | `Ctrl+P` | Manage playlists |
 | `Esc` | Clear the search |
@@ -68,6 +69,11 @@ Search ignores accents, so `malaga` finds *101TV Málaga*. Favorites and recentl
 ## TV guide
 
 Selecting a channel shows what is on now and what is next, from the TDTChannels XMLTV feed.
+
+`Ctrl+G` opens the whole schedule as a grid — one row per channel, time across the top,
+whatever is on air right now highlighted and marked with a line. Click a programme for its
+description, double-click to play that channel. `◀` and `▶` (or the arrow keys) move three
+hours at a time, and **Now** jumps back to the present.
 
 Guide data covers about a quarter of the channel list — the playlist rarely carries the `tvg-id` needed to match a channel to the guide — so many channels simply show *No guide data for this channel*.
 

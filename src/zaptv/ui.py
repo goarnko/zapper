@@ -12,11 +12,12 @@ show a per-row image, and channel logos are the point of Milestone 4.
 import queue
 import tkinter as tk
 from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter import font as tkfont
 
-from . import __version__, search, theme, updater
+from . import __version__, grid, search, theme, updater
 from . import epg as epg_module
 from . import logos as logos_module
 from . import providers as providers_module
@@ -42,6 +43,13 @@ UPDATE_TICK_MS = 1000
 DESCRIPTION_LIMIT = 165
 
 ROW_HEIGHT = 28
+
+#: Width of the frozen channel-name column in the guide grid.
+GRID_NAME_WIDTH = 150
+#: Height of the time ruler above the grid.
+GRID_RULER_HEIGHT = 22
+#: Breathing room between a block's edge and its title.
+GRID_BLOCK_PAD = 4
 
 
 def format_slot(programme: Programme | None) -> str:
@@ -392,6 +400,327 @@ class SettingsWindow(tk.Toplevel):
         self._config.save()
         self._on_save(self._config)
         self.destroy()
+
+
+class GuideWindow(tk.Toplevel):
+    """The whole schedule at once: one row per channel, time across the top.
+
+    A view over the XMLTV already in memory — it downloads nothing and adds no
+    cache. Only channels whose tvg-id the guide knows get a row, which is
+    roughly a quarter of the playlist, so the footer says how many are shown
+    rather than leaving the user hunting for a channel that was never going
+    to appear.
+
+    Time is *paged*, not scrolled horizontally. grid.build returns positions
+    as fractions of the visible window, so they map onto whatever width the
+    canvas happens to have and a resize simply redraws. Drawing only the
+    visible window also keeps the canvas at a few hundred items rather than
+    the eleven thousand programmes the feed carries.
+    """
+
+    def __init__(
+        self,
+        master: tk.Misc,
+        guide: epg_module.Guide,
+        channels: list[Channel],
+        palette: theme.Palette,
+        on_play: Callable[[Channel], None],
+        now: datetime | None = None,
+    ):
+        super().__init__(master)
+        self.title("ZapTV Guide")
+        self.geometry("900x560")
+        self.minsize(640, 360)
+        self.transient(master.winfo_toplevel())
+        self.configure(bg=palette.bg)
+        style_dialog(ttk.Style(self), palette)
+
+        self._guide = guide
+        self._channels = channels
+        self._palette = palette
+        self._on_play = on_play
+        #: Injectable so the tests do not depend on what is on air today.
+        self._now = now
+        self._rows: list[grid.Row] = []
+        self._span = grid.DEFAULT_SPAN
+        self._start = self._floor(self._clock())
+
+        self._font = tkfont.nametofont("TkDefaultFont")
+        self._build()
+        self._reload()
+
+    # -- construction ----------------------------------------------------
+
+    def _build(self) -> None:
+        toolbar = ttk.Frame(self, padding=(8, 6), style="Zap.TFrame")
+        toolbar.pack(fill=tk.X)
+        for text, command in (("◀", self._page_back), ("Now", self._go_now), ("▶", self._page_on)):
+            ttk.Button(toolbar, text=text, width=4, command=command, style="Zap.TButton").pack(
+                side=tk.LEFT, padx=(0, 4)
+            )
+        self.window_label = ttk.Label(toolbar, style="Zap.TLabel")
+        self.window_label.pack(side=tk.LEFT, padx=(10, 0))
+
+        middle = tk.Frame(self, bg=self._palette.bg)
+        middle.pack(fill=tk.BOTH, expand=True, padx=8)
+
+        left = tk.Frame(middle, bg=self._palette.bg)
+        left.pack(side=tk.LEFT, fill=tk.Y)
+        # A blank corner keeps the channel names level with the rows once the
+        # ruler has taken its height out of the column beside it.
+        tk.Frame(left, height=GRID_RULER_HEIGHT, bg=self._palette.bg).pack(fill=tk.X)
+        self.names = tk.Canvas(
+            left,
+            width=GRID_NAME_WIDTH,
+            bg=self._palette.bg,
+            highlightthickness=0,
+        )
+        self.names.pack(fill=tk.Y, expand=True)
+
+        scrollbar = ttk.Scrollbar(middle, orient=tk.VERTICAL, command=self._yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        right = tk.Frame(middle, bg=self._palette.bg)
+        right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.ruler = tk.Canvas(
+            right,
+            height=GRID_RULER_HEIGHT,
+            bg=self._palette.bg,
+            highlightthickness=0,
+        )
+        self.ruler.pack(fill=tk.X)
+        self.slots = tk.Canvas(
+            right,
+            bg=self._palette.field_bg,
+            highlightthickness=0,
+            yscrollcommand=scrollbar.set,
+        )
+        self.slots.pack(fill=tk.BOTH, expand=True)
+
+        self.detail = tk.Label(
+            self,
+            anchor="nw",
+            justify=tk.LEFT,
+            height=3,
+            bg=self._palette.bg,
+            fg=self._palette.muted,
+        )
+        self.detail.pack(fill=tk.X, padx=8, pady=(4, 0))
+
+        self.footer = tk.Label(self, anchor="w", bg=self._palette.bg, fg=self._palette.muted)
+        self.footer.pack(fill=tk.X, padx=8, pady=(0, 8))
+
+        self.slots.bind("<Configure>", lambda _e: self._draw())
+        self.slots.bind("<Button-1>", self._on_click)
+        self.slots.bind("<Double-Button-1>", self._on_activate)
+        for canvas in (self.slots, self.names):
+            # X11 reports the wheel as buttons 4 and 5, not <MouseWheel>.
+            canvas.bind("<Button-4>", lambda _e: self._scroll(-1))
+            canvas.bind("<Button-5>", lambda _e: self._scroll(1))
+        self.bind("<Left>", lambda _e: self._page_back())
+        self.bind("<Right>", lambda _e: self._page_on())
+        self.bind("<Escape>", lambda _e: self.destroy())
+
+    # -- time window -----------------------------------------------------
+
+    def _clock(self) -> datetime:
+        return self._now or datetime.now(timezone.utc)
+
+    @staticmethod
+    def _floor(moment: datetime) -> datetime:
+        """Round down to the half hour, so the ruler lands on tidy labels."""
+        return moment.replace(minute=moment.minute // 30 * 30, second=0, microsecond=0)
+
+    @property
+    def _end(self) -> datetime:
+        return self._start + self._span
+
+    def _page_back(self) -> str:
+        self._start -= grid.PAGE_STEP
+        self._reload()
+        return "break"
+
+    def _page_on(self) -> str:
+        self._start += grid.PAGE_STEP
+        self._reload()
+        return "break"
+
+    def _go_now(self) -> str:
+        self._start = self._floor(self._clock())
+        self._reload()
+        return "break"
+
+    # -- drawing ---------------------------------------------------------
+
+    def _reload(self) -> None:
+        self._rows = grid.build(self._guide, self._channels, self._start, self._end)
+        local_start = self._start.astimezone()
+        local_end = self._end.astimezone()
+        self.window_label.config(text=f"{local_start:%a %d %b  %H:%M} – {local_end:%H:%M}")
+        self.footer.config(
+            text=f"{len(self._rows)} of {len(self._channels)} channels have guide data"
+        )
+        self._draw()
+
+    def _draw(self) -> None:
+        width = self.slots.winfo_width()
+        # Before the window is mapped the canvas reports width 1; the
+        # <Configure> that follows mapping draws it properly.
+        if width <= 1:
+            return
+
+        self.slots.delete(tk.ALL)
+        self.names.delete(tk.ALL)
+        self.ruler.delete(tk.ALL)
+
+        self._draw_ruler(width)
+        for index, row in enumerate(self._rows):
+            self._draw_row(index, row, width)
+        self._draw_now_line(width)
+
+        height = max(len(self._rows) * ROW_HEIGHT, 1)
+        for canvas in (self.slots, self.names):
+            canvas.config(scrollregion=(0, 0, width, height))
+
+    def _draw_ruler(self, width: int) -> None:
+        span = self._span.total_seconds()
+        marker = self._start
+        while marker <= self._end:
+            frac = (marker - self._start).total_seconds() / span
+            x = frac * width
+            self.ruler.create_line(
+                x, GRID_RULER_HEIGHT - 5, x, GRID_RULER_HEIGHT, fill=self._palette.border
+            )
+            if marker < self._end:
+                self.ruler.create_text(
+                    x + 3,
+                    GRID_RULER_HEIGHT / 2,
+                    text=f"{marker.astimezone():%H:%M}",
+                    anchor="w",
+                    fill=self._palette.muted,
+                    font=self._font,
+                )
+            marker += timedelta(minutes=30)
+
+    def _draw_row(self, index: int, row: grid.Row, width: int) -> None:
+        top = index * ROW_HEIGHT
+        self.names.create_text(
+            4,
+            top + ROW_HEIGHT / 2,
+            text=self._fit(row.channel.name, GRID_NAME_WIDTH - 8),
+            anchor="w",
+            fill=self._palette.fg,
+            font=self._font,
+        )
+
+        at = self._clock()
+        for block in row.blocks:
+            x0 = block.start_frac * width
+            x1 = block.end_frac * width
+            live = block.programme.is_live(at)
+            self.slots.create_rectangle(
+                x0,
+                top + 1,
+                x1 - 1,
+                top + ROW_HEIGHT - 1,
+                fill=self._palette.select_bg if live else self._palette.bg,
+                outline=self._palette.border,
+            )
+            label = block.programme.title
+            if block.clipped_left:
+                label = f"‹ {label}"
+            if block.clipped_right:
+                label = f"{label} ›"
+            room = x1 - x0 - GRID_BLOCK_PAD * 2
+            text = self._fit(label, room)
+            if text:
+                self.slots.create_text(
+                    x0 + GRID_BLOCK_PAD,
+                    top + ROW_HEIGHT / 2,
+                    text=text,
+                    anchor="w",
+                    fill=self._palette.select_fg if live else self._palette.fg,
+                    font=self._font,
+                )
+
+    def _draw_now_line(self, width: int) -> None:
+        at = self._clock()
+        if not self._start <= at < self._end:
+            return
+        frac = (at - self._start).total_seconds() / self._span.total_seconds()
+        x = frac * width
+        height = max(len(self._rows) * ROW_HEIGHT, 1)
+        self.slots.create_line(x, 0, x, height, fill=self._palette.fg, width=2)
+        self.ruler.create_line(x, 0, x, GRID_RULER_HEIGHT, fill=self._palette.fg, width=2)
+
+    def _fit(self, text: str, room: float) -> str:
+        """Trim to what actually fits, measured rather than guessed at."""
+        if room <= 0:
+            return ""
+        if self._font.measure(text) <= room:
+            return text
+        for size in range(len(text) - 1, 0, -1):
+            candidate = f"{text[:size].rstrip()}…"
+            if self._font.measure(candidate) <= room:
+                return candidate
+        return ""
+
+    # -- interaction -----------------------------------------------------
+
+    def _yview(self, *args: str) -> None:
+        # One scrollbar drives both columns, or the names slide out of step
+        # with the rows they label.
+        self.names.yview(*args)
+        self.slots.yview(*args)
+
+    def _scroll(self, amount: int) -> str:
+        self._yview("scroll", str(amount), "units")
+        return "break"
+
+    def _canvas_y(self, event: "tk.Event[tk.Canvas]") -> float:
+        """Pointer y in canvas coordinates rather than widget coordinates.
+
+        The two differ once the grid has been scrolled. Tk's stubs leave
+        canvasy untyped, hence the one ignore; x needs no such conversion
+        because time is paged rather than scrolled, so the canvas never
+        moves horizontally.
+        """
+        return float(self.slots.canvasy(event.y))  # type: ignore[no-untyped-call]
+
+    def _at(self, event: "tk.Event[tk.Canvas]") -> tuple[Channel, Programme] | None:
+        """The channel and programme under the pointer, if any."""
+        width = self.slots.winfo_width()
+        index = int(self._canvas_y(event) // ROW_HEIGHT)
+        if not 0 <= index < len(self._rows) or width <= 1:
+            return None
+        row = self._rows[index]
+        frac = event.x / width
+        for block in row.blocks:
+            if block.start_frac <= frac < block.end_frac:
+                return row.channel, block.programme
+        return None
+
+    def _on_click(self, event: "tk.Event[tk.Canvas]") -> str:
+        found = self._at(event)
+        if found is None:
+            return "break"
+        channel, programme = found
+        local = programme.start.astimezone()
+        when = f"{local:%H:%M}"
+        if programme.end is not None:
+            when = f"{when}–{programme.end.astimezone():%H:%M}"
+        self.detail.config(
+            text=f"{channel.name}  {when}  {programme.title}\n{clip(programme.description)}"
+        )
+        return "break"
+
+    def _on_activate(self, event: "tk.Event[tk.Canvas]") -> str:
+        """Double-click plays the channel, which is what the app is for."""
+        found = self._at(event)
+        if found is None:
+            return "break"
+        self._on_play(found[0])
+        return "break"
 
 
 class ChannelBrowser(tk.Frame):
@@ -799,6 +1128,17 @@ class ChannelBrowser(tk.Frame):
         SettingsWindow(self, self._config, self._palette, self.retheme)
         return "break"
 
+    def open_guide(self, _event: object = None) -> str:
+        """The whole schedule, over the guide already loaded here."""
+        GuideWindow(
+            self,
+            self._guide,
+            self._channels,
+            self._palette,
+            lambda channel: self._play(channel, self._player_for(channel)),
+        )
+        return "break"
+
     def open_providers(self, _event: object = None) -> str:
         if self._sources is None:
             return "break"
@@ -876,6 +1216,7 @@ def run(
     root.bind("<Control-r>", browser.reload)
     root.bind("<Control-comma>", browser.open_settings)
     root.bind("<Control-p>", browser.open_providers)
+    root.bind("<Control-g>", browser.open_guide)
     root.bind("<Escape>", browser.clear_search)
     root.bind("<Control-q>", lambda _e: root.destroy())
 
