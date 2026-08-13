@@ -28,6 +28,28 @@ WORKERS = 6
 _FETCH_TIMEOUT = 15
 
 
+def register_formats() -> None:
+    """Register every Pillow codec up front, before any worker thread runs.
+
+    Pillow registers its plugins lazily, on the first open or save of a
+    format. That registration is not thread-safe, and this module decodes on
+    six worker threads while the main thread may also be touching Pillow, so
+    two of them can enter it at once. When they do it does not raise — the
+    interpreter aborts. CI caught exactly that once, a bare "Fatal Python
+    error: Aborted" inside Image.preinit, which then passed on re-run of the
+    same commit and the same Pillow.
+
+    Image.init rather than Image.preinit: preinit registers only six formats
+    (BMP, DIB, GIF, JPEG, PNG, PPM), which does cover every logo sampled from
+    the live playlist, but anything outside that set would fall back to the
+    lazy path and quietly restore the race. init costs about 25 ms once and
+    closes it for all 44 formats.
+
+    Idempotent, so calling it per LogoStore is free after the first.
+    """
+    Image.init()
+
+
 def cache_dir() -> Path:
     return updater.CACHE_DIR / "logos"
 
@@ -105,6 +127,10 @@ class LogoStore:
         self._work: queue.Queue[str | None] = queue.Queue()
         self._done: queue.Queue[tuple[str, Path]] = queue.Queue()
         self._lock = threading.Lock()
+        # Before the threads exist, not after: the point is that no worker
+        # ever reaches Pillow's lazy plugin registration. Done here rather
+        # than at import so a user with logos turned off pays nothing.
+        register_formats()
         self._threads = [
             threading.Thread(target=self._worker, daemon=True) for _ in range(workers)
         ]

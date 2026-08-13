@@ -1,4 +1,5 @@
 import io
+import threading
 
 from PIL import Image
 
@@ -123,5 +124,46 @@ def test_drain_is_empty_when_nothing_finished():
     store = logos.LogoStore(workers=0)
     try:
         assert store.drain() == []
+    finally:
+        store.stop()
+
+
+# -- codec registration --------------------------------------------------
+
+
+def test_register_formats_registers_every_codec():
+    """Pillow's lazy registration is not thread-safe and this module runs
+    six worker threads, so registration must be complete before they start."""
+    logos.register_formats()
+    # preinit alone would leave only these six.
+    assert {"JPEG", "PNG", "GIF", "BMP"} <= set(Image.ID)
+    assert len(Image.ID) > 6, "only the preinit subset registered"
+
+
+def test_register_formats_is_idempotent():
+    logos.register_formats()
+    before = set(Image.ID)
+    logos.register_formats()
+    assert set(Image.ID) == before
+
+
+def test_a_store_registers_formats_before_starting_workers(monkeypatch):
+    """Order is the whole point: a worker must never reach the lazy path."""
+    events = []
+
+    monkeypatch.setattr(logos, "register_formats", lambda: events.append("register"))
+
+    real_start = threading.Thread.start
+
+    def start(self):
+        events.append("thread")
+        real_start(self)
+
+    monkeypatch.setattr(threading.Thread, "start", start)
+
+    store = logos.LogoStore(workers=2)
+    try:
+        assert events[0] == "register", events
+        assert events.count("thread") == 2
     finally:
         store.stop()
