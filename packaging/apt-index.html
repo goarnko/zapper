@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ZapTV APT repository</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 16px/1.6 system-ui, sans-serif;
+    max-width: 44rem;
+    margin: 3rem auto;
+    padding: 0 1.25rem;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: .2rem; }
+  p.lead { margin-top: 0; opacity: .75; }
+  pre {
+    background: rgba(127, 127, 127, .12);
+    padding: .9rem 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+  }
+  code { font-size: .92em; }
+  footer { margin-top: 2.5rem; font-size: .9rem; opacity: .7; }
+</style>
+
+<h1>ZapTV APT repository</h1>
+<p class="lead">A fast launcher for live TV channels on Linux. Current version: @VERSION@</p>
+
+<p>Add the repository once, then ZapTV updates with the rest of your system:</p>
+
+<pre><code>sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://goarnko.github.io/zapper/zaptv.asc \
+  | sudo gpg --dearmor -o /etc/apt/keyrings/zaptv.gpg
+
+echo "deb [signed-by=/etc/apt/keyrings/zaptv.gpg] https://goarnko.github.io/zapper ./" \
+  | sudo tee /etc/apt/sources.list.d/zaptv.list
+
+sudo apt update
+sudo apt install zaptv</code></pre>
+
+<p>After that, <code>sudo apt upgrade</code> picks up new releases.</p>
+
+<p>
+  Prefer not to add a repository? Every release also has a
+  <code>.deb</code> and an AppImage attached on the
+  <a href="https://github.com/goarnko/zapper/releases">releases page</a>.
+</p>
+
+<footer>
+  <a href="https://github.com/goarnko/zapper">Source on GitHub</a> ·
+  MIT licensed ·
+  Packages are signed; the public key is
+  <a href="zaptv.asc">zaptv.asc</a>.
+</footer>

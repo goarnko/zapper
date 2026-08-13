@@ -17,9 +17,12 @@ on:
         description: "Existing tag to rebuild and republish (e.g. v0.3.0)"
         required: true
 
-# Creating a release and uploading to it needs write access to the repo.
+# contents: write to create the release; pages/id-token for the APT repo,
+# which deploys to GitHub Pages.
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 env:
   # Match ci.yml: a Pillow release must not change what gets shipped.
@@ -148,3 +151,102 @@ jobs:
           fi
           gh release view "$TAG" --json tagName,assets \
             --jq '"published \(.tagName): " + ([.assets[].name] | join(", "))'
+
+  apt:
+    # The APT repository, rebuilt from every release and served by Pages, so
+    # `apt upgrade` finds new versions instead of the update check merely
+    # mentioning them.
+    #
+    # It is rebuilt from scratch each time rather than appended to: GitHub
+    # Releases is the only source of truth for the pool, so a hand-deleted
+    # asset or a failed deploy self-heals on the next run, and there is no
+    # branch of binaries to keep.
+    needs: release
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends apt-utils
+
+      - name: Collect every released package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p site/pool
+          # Every tag that has a .deb attached, newest last so the log reads
+          # in order. A release without one (an aborted run) is skipped
+          # rather than failing the build.
+          for tag in $(gh release list --limit 100 --json tagName --jq '.[].tagName' | sort -V); do
+            if gh release download "$tag" -p "*.deb" -D site/pool 2>/dev/null; then
+              echo "  pooled $tag"
+            else
+              echo "  skipped $tag (no .deb asset)"
+            fi
+          done
+          ls -1 site/pool
+
+      - name: Build the index
+        run: |
+          cat > aptftp.conf <<'EOF'
+          APT::FTPArchive::Release {
+            Origin "ZapTV";
+            Label "ZapTV";
+            Suite "stable";
+            Codename "stable";
+            Architectures "all";
+            Components "main";
+            Description "ZapTV — a fast launcher for live TV channels on Linux";
+          };
+          EOF
+          cd site
+          apt-ftparchive packages pool > Packages
+          gzip -9kf Packages
+          # Written outside the tree first: apt-ftparchive scans the working
+          # directory, so redirecting straight into Release makes it checksum
+          # the half-written file it is producing.
+          apt-ftparchive -c ../aptftp.conf release . > ../Release.tmp
+          mv ../Release.tmp Release
+          echo "--- Release ---"
+          cat Release
+
+      - name: Sign it
+        env:
+          PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          if [ -z "$PRIVATE_KEY" ]; then
+            echo "::error::APT_GPG_PRIVATE_KEY is not set — refusing to publish an unsigned repository"
+            exit 1
+          fi
+          export GNUPGHOME="$(mktemp -d)"
+          chmod 700 "$GNUPGHOME"
+          printf '%s' "$PRIVATE_KEY" | gpg --batch --import
+          KEY="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/{print $10; exit}')"
+          echo "signing with $KEY"
+          cd site
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$PASSPHRASE" \
+            --local-user "$KEY" --clearsign -o InRelease Release
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$PASSPHRASE" \
+            --local-user "$KEY" -abs -o Release.gpg Release
+          gpg --armor --export "$KEY" > zaptv.asc
+          # Prove the signature before publishing, not after.
+          gpg --verify Release.gpg Release
+          gpg --verify InRelease
+
+      - name: Add a landing page
+        run: |
+          VERSION="$(PYTHONPATH=src python3 -c 'import zaptv; print(zaptv.__version__)')"
+          sed -e "s|@VERSION@|$VERSION|g" packaging/apt-index.html > site/index.html
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4

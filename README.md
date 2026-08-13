@@ -13,7 +13,24 @@ Channels come from the [TDTChannels](https://www.tdtchannels.com/) playlist and 
 
 ## Install
 
-**Debian / Ubuntu package** — builds a `.deb` and installs the launcher, desktop entry and icons:
+**APT repository** — the easiest route, and the only one where `apt upgrade` picks up new
+versions along with the rest of your system:
+
+```bash
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://goarnko.github.io/zapper/zaptv.asc \
+  | sudo gpg --dearmor -o /etc/apt/keyrings/zaptv.gpg
+
+echo "deb [signed-by=/etc/apt/keyrings/zaptv.gpg] https://goarnko.github.io/zapper ./" \
+  | sudo tee /etc/apt/sources.list.d/zaptv.list
+
+sudo apt update && sudo apt install zaptv
+```
+
+Packages are GPG-signed and apt verifies them; the repository is rebuilt from the published
+releases on every tag.
+
+**Build the Debian package yourself** — installs the launcher, desktop entry and icons:
 
 ```bash
 sudo apt install "$(packaging/build-deb.sh)"

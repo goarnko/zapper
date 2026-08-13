@@ -191,6 +191,15 @@ Display-dependent tests skip rather than fail when there is no `DISPLAY`, so hea
 - **`workflow_dispatch` takes an existing tag** so the whole path can be exercised without inventing a version. It republishes that tag's assets with `--clobber`, so only run it on a release you are willing to have rebuilt.
 - The release job installs `python3-tk`: the AppImage is thin and `AppRun` refuses to start without the host's Tkinter, so the `--version` smoke test would fail on a bare runner.
 
+### The APT repository
+
+A third job publishes `https://goarnko.github.io/zapper` so `apt upgrade` finds new versions, rather than the update check merely mentioning them. It is a **flat repository** — `Packages`, `Release`, `InRelease`, `pool/` in one directory — which is all a single-arch single-suite package needs; a `dists/` layout would buy nothing.
+
+- **Rebuilt from scratch every time, from GitHub Releases.** Releases are the only source of truth for the pool, so a deleted asset or a failed deploy self-heals on the next tag, and no branch of binaries has to be maintained. Pages is served from the Actions artifact, not a `gh-pages` branch.
+- **`apt-ftparchive release` must not write into the directory it scans.** Redirecting straight into `site/Release` makes it checksum the half-written file it is producing, and the result lists `Release` inside itself. Write outside the tree and move it in.
+- **Signing is mandatory**: the job fails rather than publishing unsigned if `APT_GPG_PRIVATE_KEY` is missing, and it verifies both signatures before deploying. The key lives in repo secrets (`APT_GPG_PRIVATE_KEY`, `APT_GPG_PASSPHRASE`); its fingerprint is `D42CF4D0809B958081194DE79B9B5B583E4F8633`, and the public half is published as `zaptv.asc`.
+- The whole layout was prototyped locally against the four released `.deb`s before any YAML was written, and checked with a real `apt-get update` in a sandboxed `Dir::*` tree — signatures accepted, `Candidate: 0.4.0`, `Inst zaptv [0.3.0] (0.4.0 ZapTV:stable)`, and a one-byte edit to `Packages` correctly rejected as `Hash Sum mismatch`. Reach for that sandbox rather than debugging repository metadata through CI.
+
 ## Paths
 
 XDG-split, and both honor their env vars:
