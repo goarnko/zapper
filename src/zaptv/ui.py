@@ -777,8 +777,27 @@ class ChannelBrowser(tk.Frame):
 
     def _build(self) -> None:
         self.style = ttk.Style()
-        self._entry = tk.Entry(self, textvariable=self.query)
-        self._entry.pack(fill=tk.X, pady=(0, 6))
+
+        # Search box and Guide button share a row. The button exists purely
+        # for discoverability: Ctrl+G opens the same window, but a shortcut
+        # with nothing on screen to hint at it is a feature most users never
+        # find, and SPEC.md asks for the app to be usable without reading
+        # anything.
+        self._top = tk.Frame(self)
+        self._top.pack(fill=tk.X, pady=(0, 6))
+        self._entry = tk.Entry(self._top, textvariable=self.query)
+        self._entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.guide_button = ttk.Button(
+            self._top,
+            text="Guide",
+            width=7,
+            style="Zap.TButton",
+            command=self.open_guide,
+            # Focus stays where the user put it, so Enter still plays the
+            # selected channel straight after a click here.
+            takefocus=False,
+        )
+        self.guide_button.pack(side=tk.LEFT, padx=(6, 0))
 
         body = tk.Frame(self)
         body.pack(fill=tk.BOTH, expand=True)
@@ -830,6 +849,7 @@ class ChannelBrowser(tk.Frame):
     def apply_palette(self, palette: theme.Palette) -> None:
         self._palette = palette
         self.config(bg=palette.bg)
+        self._top.config(bg=palette.bg)
         self._entry.config(
             bg=palette.field_bg,
             fg=palette.fg,
@@ -845,6 +865,12 @@ class ChannelBrowser(tk.Frame):
         # "clam" is the one built-in ttk theme that honours these colours on
         # Linux; the default theme ignores Treeview background settings.
         self.style.theme_use("clam")
+        # After theme_use, never before: ttk keeps style settings per theme,
+        # so configuring them first and then switching theme silently throws
+        # the configuration away. The Guide button is ttk and ignores
+        # widget-level colours, so without this it stays light grey in a
+        # dark app.
+        style_dialog(self.style, palette)
         self.style.configure(
             "Treeview",
             background=palette.field_bg,

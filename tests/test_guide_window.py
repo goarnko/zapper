@@ -323,3 +323,70 @@ def test_the_browser_opens_the_guide_window():
         assert len(opened) == 1
     finally:
         root.destroy()
+
+
+def test_the_main_window_has_a_guide_button_that_opens_it():
+    """Ctrl+G alone is undiscoverable, so the button is the visible route."""
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv import ui
+    from zaptv.player import VLCPlayer
+    from zaptv.storage import Favorites, Recent
+
+    channels, guide = _fixture()
+    root = tk.Tk()
+    try:
+        browser = ui.ChannelBrowser(
+            root, channels, VLCPlayer(), Favorites([]), Recent([]), guide
+        )
+        browser.pack(fill=tk.BOTH, expand=True)
+        root.update()
+
+        assert browser.guide_button.cget("text") == "Guide"
+        # It must not take focus, or Enter after a click would re-press the
+        # button instead of playing the selected channel.
+        assert str(browser.guide_button.cget("takefocus")) in ("0", "False", "")
+
+        browser.guide_button.invoke()
+        root.update()
+        opened = [w for w in browser.winfo_children() if isinstance(w, ui.GuideWindow)]
+        assert len(opened) == 1
+    finally:
+        root.destroy()
+
+
+def test_the_guide_button_is_themed_in_dark_mode():
+    """ttk ignores widget colours, so an unstyled button stays light grey."""
+    if not _tk_available():
+        return
+    import tkinter as tk
+    from tkinter import ttk
+
+    from zaptv import theme, ui
+    from zaptv.player import VLCPlayer
+    from zaptv.settings import Settings
+    from zaptv.storage import Favorites, Recent
+
+    channels, guide = _fixture()
+    root = tk.Tk()
+    try:
+        browser = ui.ChannelBrowser(
+            root,
+            channels,
+            VLCPlayer(),
+            Favorites([]),
+            Recent([]),
+            guide,
+            Settings(theme="dark"),
+        )
+        browser.pack(fill=tk.BOTH, expand=True)
+        root.update()
+
+        dark = theme.get("dark")
+        style = ttk.Style(root)
+        assert style.lookup("Zap.TButton", "background") == dark.field_bg
+        assert style.lookup("Zap.TButton", "foreground") == dark.fg
+    finally:
+        root.destroy()
