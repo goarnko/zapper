@@ -1,0 +1,150 @@
+name: Release
+
+# Pushing a tag builds both artifacts and publishes them. Until now that was
+# done by hand: CI built the .deb only as a throwaway workflow artifact and
+# never built the AppImage at all, so a broken AppImage would not have been
+# noticed until release day.
+#
+# workflow_dispatch takes an existing tag so the whole path can be exercised
+# without inventing a version. It republishes that tag's assets, so use it on
+# a release you are willing to have rebuilt.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to rebuild and republish (e.g. v0.3.0)"
+        required: true
+
+# Creating a release and uploading to it needs write access to the repo.
+permissions:
+  contents: write
+
+env:
+  # Match ci.yml: a Pillow release must not change what gets shipped.
+  PILLOW_VERSION: "12.3.0"
+
+jobs:
+  verify:
+    # ci.yml runs on pushes to main, not on tags, so a tag would otherwise be
+    # released with nothing checked. This repeats the gates deliberately.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Tk and a virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-tk xvfb
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]" "pillow==${{ env.PILLOW_VERSION }}"
+
+      - name: Lint
+        run: ruff check src tests
+
+      - name: Type check
+        run: mypy
+
+      - name: Test
+        run: xvfb-run -a python -m pytest tests -q
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          # The annotated tag's message becomes the release notes, and that
+          # needs the tag object rather than a shallow checkout.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          # python3-tk because the AppImage is thin: it uses the host's
+          # Python and Tkinter, and AppRun refuses to start without them, so
+          # the smoke test below would fail on a bare runner.
+          sudo apt-get install -y --no-install-recommends \
+            fakeroot desktop-file-utils python3-tk
+          python -m pip install --upgrade pip
+          python -m pip install "pillow==${{ env.PILLOW_VERSION }}"
+
+      - name: Check the tag matches the version in the source
+        # The packaging scripts read __version__, so a tag pushed without the
+        # bump would publish v0.4.0 containing 0.3.0 artifacts. Fail loudly
+        # instead: this is the mistake the single-sourced version cannot catch.
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="$(PYTHONPATH=src python -c 'import zaptv; print(zaptv.__version__)')"
+          echo "tag=$TAG source=$VERSION"
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::tag $TAG does not match __version__ $VERSION — bump src/zaptv/__init__.py"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+
+      - name: Validate desktop entry
+        run: desktop-file-validate packaging/zaptv.desktop
+
+      - name: Build the Debian package
+        run: echo "DEB=$(packaging/build-deb.sh)" >> "$GITHUB_ENV"
+
+      - name: Build the AppImage
+        run: echo "APPIMAGE=$(packaging/build-appimage.sh)" >> "$GITHUB_ENV"
+
+      - name: Check the artifacts carry the right version
+        run: |
+          test "$(dpkg-deb -f "$DEB" Version)" = "$VERSION"
+          test "$(dpkg-deb -f "$DEB" Package)" = "zaptv"
+          # The AppImage runs on the host's Python, which the runner has.
+          test "$("$APPIMAGE" --version)" = "$VERSION"
+          echo "$DEB and $APPIMAGE both report $VERSION"
+
+      - name: Check the package installs and runs
+        run: |
+          sudo apt-get install -y "$DEB"
+          zaptv --version
+          zaptv --players
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # An annotated tag carries the notes; a lightweight one has none, so
+          # fall back rather than publishing an empty release body.
+          #
+          # The test is the object type, not the contents: `git tag -l
+          # --format=%(contents)` on a lightweight tag returns the commit
+          # message it points at, so it never looks empty and the fallback
+          # would never fire.
+          if [ "$(git cat-file -t "$TAG" 2>/dev/null)" = "tag" ]; then
+            NOTES=(--notes-from-tag)
+          else
+            NOTES=(--generate-notes)
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # Re-run or manual dispatch: replace the assets, leave the notes.
+            gh release upload "$TAG" "$DEB" "$APPIMAGE" --clobber
+          else
+            gh release create "$TAG" --title "ZapTV ${VERSION}" "${NOTES[@]}" \
+              "$DEB" "$APPIMAGE"
+          fi
+          gh release view "$TAG" --json tagName,assets \
+            --jq '"published \(.tagName): " + ([.assets[].name] | join(", "))'

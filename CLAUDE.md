@@ -184,6 +184,13 @@ Display-dependent tests skip rather than fail when there is no `DISPLAY`, so hea
 
 `.desktop` uses `StartupWMClass=Tk`, matching the WM_CLASS Tk actually sets (`("tk" "Tk")`). `build/` and `dist/` are gitignored.
 
+**Releasing is `.github/workflows/release.yml`, on a tag push.** It re-runs the gates first — `ci.yml` triggers on pushes to `main`, not on tags, so without that a tag would publish unchecked code — then builds both artifacts, asserts they carry the tag's version, installs the `.deb` and runs it, and creates the release.
+
+- **It refuses a tag that does not match `__version__`.** Single-sourcing the version means one edit updates everything, but nothing stops you tagging `v0.4.0` while the source still says `0.3.0`; the artifacts would then be named for the old version. That check is the one thing single-sourcing cannot do for you.
+- **Annotated tags become the release notes**, detected with `git cat-file -t` — *not* `git tag -l --format=%(contents)`, which on a lightweight tag returns the commit message it points at and so never looks empty. Testing that fallback locally is what caught it.
+- **`workflow_dispatch` takes an existing tag** so the whole path can be exercised without inventing a version. It republishes that tag's assets with `--clobber`, so only run it on a release you are willing to have rebuilt.
+- The release job installs `python3-tk`: the AppImage is thin and `AppRun` refuses to start without the host's Tkinter, so the `--version` smoke test would fail on a bare runner.
+
 ## Paths
 
 XDG-split, and both honor their env vars:
