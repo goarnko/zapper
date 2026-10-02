@@ -1,8 +1,8 @@
 # ZapTV
 
-A fast launcher for live TV channels on Linux. Browse the channel list, pick a channel, VLC opens. Nothing else.
+A fast launcher for live TV channels on Linux. Browse the channel list, pick a channel, and it opens — in VLC, or in your browser for channels that only stream on the broadcaster's own site. A TV guide shows what is on. Nothing else: no library, no recordings.
 
-Channels come from the [TDTChannels](https://www.tdtchannels.com/) playlist and are downloaded at runtime — none are shipped with the app.
+Channels come from the [TDTChannels](https://www.tdtchannels.com/) playlist and are downloaded at runtime — none are shipped with the app. Spanish channels that stream only on their own sites (Atresmedia, Mediaset) are included as web channels, and France's TNT and the UK's Freeview can be switched on too.
 
 ## Requirements
 
