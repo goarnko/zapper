@@ -17,7 +17,7 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter import font as tkfont
 
-from . import __version__, grid, search, theme, updater
+from . import __version__, grid, search, theme, updater, webchannels
 from . import epg as epg_module
 from . import logos as logos_module
 from . import providers as providers_module
@@ -1031,6 +1031,9 @@ class ChannelBrowser(tk.Frame):
         self._guide = guide or epg_module.Guide()
         self._config = config or Settings()
         self._sources = sources
+        #: The optional guide feeds the guide was loaded with, so enabling a
+        #: regional list in the playlists window can fetch its listings.
+        self._guide_sources = webchannels.guide_sources(sources)
         self._palette = theme.get(self._config.theme)
 
         self._logos = logo_store
@@ -1591,6 +1594,14 @@ class ChannelBrowser(tk.Frame):
             self.status.config(text=f"Unavailable: {', '.join(failed)}")
             self.update_idletasks()
 
+        # Enabling a regional list brings its guide feed with it; disabling
+        # one drops it, so its listings stop being downloaded.
+        wanted = webchannels.guide_sources(self._sources)
+        if wanted != self._guide_sources:
+            self._guide_sources = wanted
+            self._guide = epg_module.load_all(updater.ensure_epgs(extra=wanted))
+            self._update_guide()
+
     def reload(self, _event: object = None) -> str:
         """Force a refresh of every playlist and the guide."""
         self._reload_channels(force=True)
@@ -1601,7 +1612,7 @@ class ChannelBrowser(tk.Frame):
         # empty list — not an exception — is what "no guide at all" looks
         # like. One source failing while another works is silent on purpose:
         # the user loses some channels' listings, not the feature.
-        paths = updater.download_epgs()
+        paths = updater.download_epgs(extra=self._guide_sources)
         self._guide = epg_module.load_all(paths)
         self._update_guide()
         if not paths:

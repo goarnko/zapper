@@ -156,6 +156,19 @@ watch, and the file is yours to edit or remove.
 All thirteen show Now/Next. The Mediaset ones come from the TDTChannels guide; Atresmedia is
 missing from that feed entirely, so those six are filled in from a second XMLTV source.
 
+## France and the UK
+
+For travelling, or for living there, ZapTV also creates **Web channels (France)** — the
+free TNT channels (TF1, France 2–5, M6, Arte, BFM TV, franceinfo, …) — and **Web channels
+(UK)** — the Freeview majors (BBC One–Four, ITV1–4, Channel 4, Channel 5, S4C, …). They
+work the same way: each opens the broadcaster's official live page in your browser.
+
+Both start **disabled**: enable them under `Ctrl+P`. Most of these pages only play inside
+their own country, and some (TF1+, M6+, ITVX, Channel 4) ask for a free account; BBC
+iPlayer also expects a UK TV licence. Enabling a list also turns on its guide, so Now/Next
+appears for nearly all of them — from [xmltvfr.fr](https://xmltvfr.fr) for France and
+epgshare01 for the UK. While a list is disabled, its guide is not downloaded.
+
 ## Updates
 
 ZapTV checks once a day whether a newer release exists and mentions it in the status bar.

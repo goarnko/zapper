@@ -157,3 +157,104 @@ def test_upgrade_of_a_missing_file_does_nothing(tmp_path):
 def test_a_fresh_seed_needs_no_upgrade(tmp_path):
     path = webchannels.write_seed(tmp_path / "web-channels.m3u")
     assert webchannels.upgrade_seed(path) == 0
+
+
+# -- France and the UK ---------------------------------------------------
+
+
+def test_regional_lists_cover_the_main_free_channels():
+    france = {name for name, _url, _id in webchannels.FRANCE.channels}
+    uk = {name for name, _url, _id in webchannels.UK.channels}
+    assert {"TF1", "France 2", "France 3", "France 5", "M6", "Arte"} <= france
+    assert {"BBC One", "BBC Two", "ITV1", "Channel 4", "Channel 5"} <= uk
+
+
+def test_regional_entries_are_https_pages_with_unique_names():
+    for regional in webchannels.REGIONAL_LISTS:
+        names = [name for name, _url, _id in regional.channels]
+        assert len(names) == len(set(names)), regional.provider
+        for _name, url, _id in regional.channels:
+            assert url.startswith("https://")
+
+
+def test_regional_lists_parse_back_as_browser_channels():
+    for regional in webchannels.REGIONAL_LISTS:
+        channels = playlist.parse(regional.render())
+        assert len(channels) == len(regional.channels)
+        assert {c.player for c in channels} == {"browser"}
+        assert {c.group for c in channels} == {regional.group}
+
+
+def test_regional_names_with_apostrophes_and_accents_survive():
+    by_name = {c.name: c for c in playlist.parse(webchannels.FRANCE.render())}
+    assert by_name["L'Équipe"].tvg_id == "LEquipe21.fr"
+    assert by_name["RMC Découverte"].stream == "https://www.rmcplus.fr/direct/rmc_decouverte"
+    # No id is rendered as no attribute, not an empty one.
+    assert by_name["France 24"].tvg_id is None
+
+
+def test_regional_lists_do_not_repeat_spanish_or_each_others_names():
+    """A shared name would be favorited together and merged on (name, group)."""
+    spain = {name for name, _url, _id in webchannels.SEED_CHANNELS}
+    france = {name for name, _url, _id in webchannels.FRANCE.channels}
+    uk = {name for name, _url, _id in webchannels.UK.channels}
+    assert not spain & france and not spain & uk and not france & uk
+
+
+def test_install_regional_registers_every_list_disabled(tmp_path):
+    sources = ProviderList([], tmp_path / "p.json")
+
+    added = webchannels.install_regional(sources, tmp_path)
+
+    assert added == [r.provider for r in webchannels.REGIONAL_LISTS]
+    for regional in webchannels.REGIONAL_LISTS:
+        provider = sources.get(regional.provider)
+        assert provider is not None
+        assert not provider.enabled, "geo-restricted lists must start switched off"
+        assert regional.path(tmp_path).exists()
+
+
+def test_install_regional_is_idempotent_and_respects_removal(tmp_path):
+    sources = ProviderList([], tmp_path / "p.json")
+    webchannels.install_regional(sources, tmp_path)
+    sources.set_enabled(webchannels.FRANCE.provider, True)
+    sources.remove(webchannels.UK.provider)
+
+    assert webchannels.install_regional(sources, tmp_path) == []
+    assert sources.get(webchannels.UK.provider) is None
+    france = sources.get(webchannels.FRANCE.provider)
+    assert france is not None and france.enabled, "a repeat must not switch it back off"
+
+
+def test_install_regional_leaves_user_edits_alone(tmp_path):
+    path = webchannels.UK.path(tmp_path)
+    path.write_text("#EXTM3U\n# my own edits\n", encoding="utf-8")
+    sources = ProviderList([], tmp_path / "p.json")
+
+    assert webchannels.install_regional(sources, tmp_path) == [webchannels.FRANCE.provider]
+    assert "my own edits" in path.read_text(encoding="utf-8")
+
+
+def test_guide_sources_follow_the_enabled_lists(tmp_path):
+    sources = ProviderList([], tmp_path / "p.json")
+    webchannels.install_regional(sources, tmp_path)
+    assert webchannels.guide_sources(sources) == []
+
+    sources.set_enabled(webchannels.UK.provider, True)
+    assert webchannels.guide_sources(sources) == [webchannels.UK.guide]
+
+    sources.set_enabled(webchannels.FRANCE.provider, True)
+    assert webchannels.guide_sources(sources) == [
+        webchannels.FRANCE.guide,
+        webchannels.UK.guide,
+    ]
+    assert webchannels.guide_sources(None) == []
+
+
+def test_regional_guides_do_not_collide_with_the_built_in_ones():
+    from zaptv import updater
+
+    built_in = {slug for slug, _url in updater.EPG_SOURCES}
+    regional = [r.guide[0] for r in webchannels.REGIONAL_LISTS]
+    assert len(set(regional)) == len(regional)
+    assert not built_in & set(regional)

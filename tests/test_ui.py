@@ -697,3 +697,54 @@ def test_collapsing_everything_leaves_nothing_selected():
         assert browser.selected() is None
     finally:
         root.destroy()
+
+
+def test_enabling_a_regional_list_fetches_its_guide(tmp_path, monkeypatch):
+    """The playlists window only reloads channels; the guide has to follow.
+
+    Without this, switching on France would list its channels with no
+    listings until the next restart, and switching it off would keep
+    downloading a feed nobody looks at.
+    """
+    if not _tk_available():
+        return
+
+    import tkinter as tk
+
+    from zaptv import epg, ui, updater, webchannels
+    from zaptv.models import Channel
+    from zaptv.player import VLCPlayer
+    from zaptv.providers import ProviderList
+    from zaptv.settings import Settings
+    from zaptv.storage import Favorites, Recent
+
+    sources = ProviderList([], tmp_path / "p.json")
+    webchannels.install_regional(sources, tmp_path)
+    channels = [Channel(name="Alfa", group="Uno", streams=["https://x.invalid/1"])]
+    monkeypatch.setattr(sources, "load_channels", lambda max_age=0: (channels, []))
+    requested = []
+
+    def ensure_epgs(max_age=updater.MAX_AGE_SECONDS, extra=()):
+        requested.append(list(extra))
+        return []
+
+    monkeypatch.setattr(updater, "ensure_epgs", ensure_epgs)
+
+    root = tk.Tk()
+    try:
+        browser = ui.ChannelBrowser(
+            root, channels, VLCPlayer(), Favorites([]), Recent([]), epg.Guide(),
+            Settings(show_logos=False), None, sources,
+        )
+        browser._reload_channels()
+        assert requested == [], "nothing changed, so the guide must not be refetched"
+
+        sources.set_enabled(webchannels.FRANCE.provider, True)
+        browser._reload_channels()
+        assert requested == [[webchannels.FRANCE.guide]]
+
+        sources.set_enabled(webchannels.FRANCE.provider, False)
+        browser._reload_channels()
+        assert requested[-1] == []
+    finally:
+        root.destroy()

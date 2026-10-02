@@ -109,6 +109,14 @@ def test_adding_an_existing_name_updates_it(tmp_path):
     assert mine.enabled
 
 
+def test_a_source_can_be_added_switched_off(tmp_path):
+    path = tmp_path / "p.json"
+    ProviderList.load(path).add("Abroad", "/x/abroad.m3u", enabled=False)
+
+    abroad = ProviderList.load(path).get("Abroad")
+    assert abroad is not None and not abroad.enabled
+
+
 def test_remove(tmp_path):
     listing = ProviderList.load(tmp_path / "p.json")
     listing.add("Mine", "https://x.invalid/m.m3u8")

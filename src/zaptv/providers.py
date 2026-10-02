@@ -170,17 +170,17 @@ class ProviderList:
     def get(self, name: str) -> Provider | None:
         return next((p for p in self._providers if p.name == name), None)
 
-    def add(self, name: str, url: str) -> Provider:
+    def add(self, name: str, url: str, enabled: bool = True) -> Provider:
         """Add a source. Names are unique, so a repeat updates the URL."""
         name = name.strip() or url
         existing = self.get(name)
         if existing is not None:
             existing.url = url
-            existing.enabled = True
+            existing.enabled = enabled
             self.save()
             return existing
 
-        provider = Provider(name=name, url=url)
+        provider = Provider(name=name, url=url, enabled=enabled)
         self._providers.append(provider)
         self.save()
         return provider

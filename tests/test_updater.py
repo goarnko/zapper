@@ -87,6 +87,27 @@ def test_a_fresh_cache_is_not_downloaded_again(cache, monkeypatch):
     assert calls == [], "a cache inside its max age must not be refetched"
 
 
+# -- optional sources ----------------------------------------------------
+
+
+def test_extra_sources_come_after_the_built_ins(cache):
+    extra = [("extra", "https://extra.invalid/e.gz")]
+    assert [slug for slug, _ in updater.epg_sources(extra)] == ["first", "second", "extra"]
+    # Repeating a built-in must not fetch it twice or move it ahead.
+    assert updater.epg_sources(updater.EPG_SOURCES) == updater.EPG_SOURCES
+
+
+def test_extra_sources_are_fetched_only_when_asked_for(cache, monkeypatch):
+    extra = [("extra", "https://extra.invalid/e.gz")]
+    calls = _fake_download(monkeypatch)
+    assert [p.name for p in updater.ensure_epgs()] == ["epg-first.xml.gz", "epg-second.xml.gz"]
+    assert "https://extra.invalid/e.gz" not in calls
+
+    paths = updater.download_epgs(extra=extra)
+    assert [p.name for p in paths][-1] == "epg-extra.xml.gz"
+    assert updater.ensure_epgs(extra=extra)[-1].name == "epg-extra.xml.gz"
+
+
 # -- migrating the single-source cache ----------------------------------
 
 

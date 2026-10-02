@@ -141,6 +141,18 @@ All 13 web channels now show Now/Next, but their ids come from **two different f
 
 `upgrade_seed` exists because those six shipped with **no** id: `install()` is a no-op once the file exists, so without it an existing user would never gain the data. It rewrites a line only when that line still matches byte-for-byte what ZapTV wrote — the file is the user's, and an edited line keeps no guide rather than being silently rewritten.
 
+### France and the UK
+
+`webchannels.REGIONAL_LISTS` applies the same mechanism to French TNT and UK Freeview, as `Web channels (France)` and `Web channels (UK)`. Three decisions, all measured first:
+
+- **Pages, not iptv-org's streams.** iptv-org's `fr.m3u`/`uk.m3u` do list the majors, but nearly every one was an unofficial restream — bare IPs, `iptvhd.ru`, `stmify`, `short.gy` redirectors — and the few official URLs (BBC on Akamai, S4C) are tagged geo-blocked. Adding those lists would mean shipping pirate restreams by default. Don't revisit without the user asking.
+- **Registered disabled.** Most pages are geo-restricted to their own country (Channel 5 redirects *every* path, even a nonsense one, to `geo-restriction.html` from Spain), so to a Spanish user they would only clutter the list. `install_regional` follows `install`'s rules: an existing file or provider means hands off.
+- **Each list owns its guide feed, fetched only while enabled.** `guide_sources(sources)` turns enabled lists into `extra` for `updater.ensure_epgs`/`download_epgs`, which go *after* `EPG_SOURCES` so they can never take an id from a built-in. That keeps ~4 MB/day off users who never enable them. `ChannelBrowser._reload_channels` refetches the guide when that set changes, because the playlists window only reloads channels. France uses xmltvfr.fr's TNT feed (30 channels, ~10 days, 1.2 MB); the UK uses epgshare01's `UK1`. Measured: 0 ids shared between either and the existing feeds, and between each other.
+
+Ids that look wrong are right: xmltvfr keeps pre-rename ids (`NT1.fr` is TFX, `Numero23.fr` RMC Story, `Cherie25.fr` RMC Life). France 24 and ITVBe have no listing. Sky News and TV5Monde are left out because TDTChannels already carries them as open streams.
+
+Page reachability is **not** in the integration suite for these lists: ITV's Akamai front stalls non-browser clients after the TLS handshake, Channel 5 is geo-blocked, and CNews/L'Équipe/France 24 answer bot challenges. ITV's `watch?channel=` URLs and those three were confirmed via recent Wayback captures instead; the integration test checks the guide ids, which *are* probeable.
+
 ## Quality gates
 
 All three pass; keep them passing.
@@ -155,7 +167,7 @@ All three pass; keep them passing.
 
     The ordering test is the one that matters and was checked by reverting the fix — moving the call after `thread.start()` makes it fail. A test that only asserts the formats are registered would pass either way. A green local mypy is therefore not proof — CI caught two real errors in `logos.convert` this way (`convert()` returns `Image`, not `ImageFile`, and `Image.LANCZOS` is a legacy alias the stubs do not declare; use `Image.Resampling.LANCZOS`). To reproduce CI locally, unzip a Pillow wheel and point `MYPYPATH` at it, then read only the `src/`- and `tests/`-prefixed errors.
   - `logos.LogoSource` is a `Protocol` covering just `path_for`/`drain`. `ChannelBrowser` takes that rather than `LogoStore`, so test doubles satisfy it structurally instead of needing a cast.
-- **pytest** — 189 unit tests, plus 5 integration tests that are **off unless `ZAPTV_INTEGRATION=1`**. (Those five gate with `if not ENABLED: return` inside each body rather than a skip marker, so a normal run reports 194 passed and no skips — they are off, but the count gives no sign of it.) Those hit the live feeds and assert loose bounds (≥250 channels, ≥1000 programmes, playlist and guide still share tvg-ids, broadcaster pages still 200). They exist to catch the feed changing shape, which no unit test can. CI runs them weekly and on demand, never on a PR.
+- **pytest** — 278 unit tests, plus 7 integration tests that are **off unless `ZAPTV_INTEGRATION=1`**. (Those seven gate with `if not ENABLED: return` inside each body rather than a skip marker, so a normal run reports 285 passed and no skips — they are off, but the count gives no sign of it.) Those hit the live feeds and assert loose bounds (≥250 channels, ≥1000 programmes, playlist and guide still share tvg-ids, broadcaster pages still 200, regional guides still carry their ids). They exist to catch the feed changing shape, which no unit test can. CI runs them weekly and on demand, never on a PR.
 
 **Tests must not depend on what is installed.** Anything touching a player patches `shutil.which` rather than assuming VLC or `xdg-open` exists — CI runners have neither. To check, run the suite with `shutil.which` stubbed to return `None` for `vlc`, `mpv` and `xdg-open`.
 

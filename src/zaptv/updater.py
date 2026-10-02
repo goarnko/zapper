@@ -7,6 +7,7 @@ TDTChannels and cached under ~/.local/share/zaptv/, refreshed when stale.
 import os
 import time
 import urllib.request
+from collections.abc import Sequence
 from pathlib import Path
 
 PLAYLIST_URL = "https://www.tdtchannels.com/lists/tv.m3u8"
@@ -123,7 +124,19 @@ def migrate_legacy_epg() -> None:
         legacy.replace(target)
 
 
-def ensure_epgs(max_age: int = MAX_AGE_SECONDS) -> list[Path]:
+def epg_sources(extra: Sequence[tuple[str, str]] = ()) -> list[tuple[str, str]]:
+    """The always-on sources followed by any optional ones.
+
+    `extra` are feeds wanted only while some playlist is enabled — the
+    regional web channels — so they go after the built-ins and can never
+    take a channel id away from them.
+    """
+    return EPG_SOURCES + [source for source in extra if source not in EPG_SOURCES]
+
+
+def ensure_epgs(
+    max_age: int = MAX_AGE_SECONDS, extra: Sequence[tuple[str, str]] = ()
+) -> list[Path]:
     """Cached paths for every guide source that has usable data.
 
     Sources are independent: one being unreachable costs only its own
@@ -133,7 +146,7 @@ def ensure_epgs(max_age: int = MAX_AGE_SECONDS) -> list[Path]:
     """
     migrate_legacy_epg()
     paths = []
-    for slug, url in EPG_SOURCES:
+    for slug, url in epg_sources(extra):
         try:
             paths.append(ensure(epg_path(slug), max_age, url))
         except OSError:
@@ -141,11 +154,11 @@ def ensure_epgs(max_age: int = MAX_AGE_SECONDS) -> list[Path]:
     return paths
 
 
-def download_epgs() -> list[Path]:
+def download_epgs(extra: Sequence[tuple[str, str]] = ()) -> list[Path]:
     """Force a refresh of every guide source, keeping whatever succeeds."""
     migrate_legacy_epg()
     paths = []
-    for slug, url in EPG_SOURCES:
+    for slug, url in epg_sources(extra):
         path = epg_path(slug)
         try:
             paths.append(download(path, url))

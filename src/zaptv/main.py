@@ -30,6 +30,9 @@ def main(argv: list[str] | None = None) -> int:
     # Existing seed files predate the Atresmedia guide ids; install() will not
     # touch a file that already exists, so the ids are added here instead.
     webchannels.upgrade_seed()
+    # France and the UK, registered disabled: their pages mostly play only
+    # inside their own country.
+    webchannels.install_regional(sources)
 
     if "--providers" in argv:
         return _print_providers(sources)
@@ -54,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         channels = search.filter_channels(channels, query)
 
     if "--now" in argv:
-        return _print_now(channels, config)
+        return _print_now(channels, config, sources)
 
     if "--list" in argv or "--search" in argv:
         favorites = Favorites.load()
@@ -78,7 +81,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    ui.run(channels, config, Favorites.load(), Recent.load(), _load_guide(config), sources)
+    guide = _load_guide(config, sources)
+    ui.run(channels, config, Favorites.load(), Recent.load(), guide, sources)
     return 0
 
 
@@ -117,23 +121,26 @@ def _print_providers(sources: "providers.ProviderList") -> int:
     return 0
 
 
-def _load_guide(config: Settings) -> epg.Guide:
+def _load_guide(config: Settings, sources: "providers.ProviderList") -> epg.Guide:
     """Fetch and parse the guide, tolerating its absence.
 
     The guide is a nice-to-have: every failure here degrades to an empty
     Guide, and the app still lists and plays channels.
     """
+    extra = webchannels.guide_sources(sources)
     if config.auto_update:
-        return epg.load_all(updater.ensure_epgs())
+        return epg.load_all(updater.ensure_epgs(extra=extra))
 
     updater.migrate_legacy_epg()
-    cached = [updater.epg_path(slug) for slug, _ in updater.EPG_SOURCES]
+    cached = [updater.epg_path(slug) for slug, _ in updater.epg_sources(extra)]
     return epg.load_all(p for p in cached if p.exists())
 
 
-def _print_now(channels: list[Channel], config: Settings) -> int:
+def _print_now(
+    channels: list[Channel], config: Settings, sources: "providers.ProviderList"
+) -> int:
     """Print Now/Next per channel — the guide equivalent of --list."""
-    guide = _load_guide(config)
+    guide = _load_guide(config, sources)
     if not len(guide):
         print("No guide data available.", file=sys.stderr)
         return 1

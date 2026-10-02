@@ -115,3 +115,22 @@ def test_web_channel_pages_are_reachable():
         if _fetch_status(url) >= 400
     ]
     assert not unreachable, f"broadcaster pages moved: {unreachable}"
+
+
+def test_regional_guide_feeds_still_carry_their_channels():
+    """Each regional list names ids from one feed; a rename there silently
+    costs those channels their listings.
+
+    Page reachability is deliberately not probed for these lists, unlike the
+    Spanish one: ITV stalls non-browser clients, Channel 5 redirects every
+    path to a geo-restriction page from outside the UK, and CNews, L'Équipe
+    and France 24 answer bot challenges. A status code from here would say
+    more about where the test runs than about whether the page moved.
+    """
+    if not ENABLED:
+        return
+    for regional in webchannels.REGIONAL_LISTS:
+        slug, url = regional.guide
+        guide = epg.load(updater.download(updater.epg_path(slug), url))
+        missing = [tvg for _name, _page, tvg in regional.channels if tvg and not guide.has(tvg)]
+        assert not missing, f"{regional.provider}: guide no longer carries {missing}"
