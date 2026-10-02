@@ -18,12 +18,21 @@ from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter import font as tkfont
 
 from . import __version__, grid, search, theme, updater, webchannels
+from . import browsers as browsers_module
 from . import epg as epg_module
 from . import logos as logos_module
 from . import providers as providers_module
 from . import updates as updates_module
 from .models import Channel, Programme
-from .player import PLAYERS, SELECTABLE, Player, PlayerNotFound, get_player, resolve
+from .player import (
+    PLAYERS,
+    SELECTABLE,
+    BrowserPlayer,
+    Player,
+    PlayerNotFound,
+    get_player,
+    resolve,
+)
 from .settings import Settings
 from .storage import Favorites, Recent
 
@@ -421,6 +430,7 @@ class SettingsWindow(tk.Toplevel):
         self.theme_name = tk.StringVar(value=config.theme)
         self.show_logos = tk.BooleanVar(value=config.show_logos)
         self.check_updates = tk.BooleanVar(value=config.check_updates)
+        self.browser = tk.StringVar(value=config.browser)
 
         body = ttk.Frame(self, padding=12, style="Zap.TFrame")
         body.pack(fill=tk.BOTH, expand=True)
@@ -441,39 +451,41 @@ class SettingsWindow(tk.Toplevel):
                 style="Zap.TRadiobutton",
             ).grid(row=1, column=column, sticky="w", padx=(0, 12))
 
+        row = self._browser_choices(body, config, first_row=2)
+
         ttk.Separator(body, orient=tk.HORIZONTAL, style="Zap.TSeparator").grid(
-            row=2, column=0, columnspan=2, sticky="ew", pady=10
+            row=row, column=0, columnspan=2, sticky="ew", pady=10
         )
 
         ttk.Label(body, text="Appearance", style="Zap.TLabel").grid(
-            row=3, column=0, sticky="w", pady=(0, 4)
+            row=row + 1, column=0, sticky="w", pady=(0, 4)
         )
         for column, name in enumerate(("light", "dark")):
             ttk.Radiobutton(
                 body, text=name, value=name, variable=self.theme_name,
                 style="Zap.TRadiobutton",
-            ).grid(row=4, column=column, sticky="w", padx=(0, 12))
+            ).grid(row=row + 2, column=column, sticky="w", padx=(0, 12))
 
         ttk.Checkbutton(
             body, text="Show channel logos", variable=self.show_logos, style="Zap.TCheckbutton"
         ).grid(
-            row=5, column=0, columnspan=2, sticky="w", pady=(8, 0)
+            row=row + 3, column=0, columnspan=2, sticky="w", pady=(8, 0)
         )
         ttk.Checkbutton(
             body,
             text="Update playlist and guide automatically",
             variable=self.auto_update,
             style="Zap.TCheckbutton",
-        ).grid(row=6, column=0, columnspan=2, sticky="w")
+        ).grid(row=row + 4, column=0, columnspan=2, sticky="w")
         ttk.Checkbutton(
             body,
             text="Tell me when a new ZapTV is released",
             variable=self.check_updates,
             style="Zap.TCheckbutton",
-        ).grid(row=7, column=0, columnspan=2, sticky="w")
+        ).grid(row=row + 5, column=0, columnspan=2, sticky="w")
 
         buttons = ttk.Frame(body, style="Zap.TFrame")
-        buttons.grid(row=8, column=0, columnspan=2, sticky="e", pady=(14, 0))
+        buttons.grid(row=row + 6, column=0, columnspan=2, sticky="e", pady=(14, 0))
         ttk.Button(
             buttons, text="Cancel", command=self.destroy, style="Zap.TButton"
         ).pack(side=tk.RIGHT, padx=(6, 0))
@@ -484,12 +496,47 @@ class SettingsWindow(tk.Toplevel):
         self.bind("<Escape>", lambda _e: self.destroy())
         self.bind("<Return>", lambda _e: self._save())
 
+    def _browser_choices(self, body: ttk.Frame, config: Settings, first_row: int) -> int:
+        """One radio per installed browser, plus the desktop default.
+
+        Returns the next free grid row. A saved choice that is no longer
+        installed stays listed, disabled, so the window shows why web
+        channels have gone back to the default rather than silently
+        forgetting what the user picked.
+        """
+        ttk.Label(body, text="Web channels open in", style="Zap.TLabel").grid(
+            row=first_row, column=0, columnspan=2, sticky="w", pady=(10, 4)
+        )
+        installed = browsers_module.installed()
+        default_id = browsers_module.system_default()
+        default = next((b.name for b in installed if b.id == default_id), None)
+        choices: list[tuple[str, str, bool]] = [
+            ("", f"System default ({default})" if default else "System default", True)
+        ]
+        choices += [(b.id, b.name, True) for b in installed]
+        if config.browser and all(b.id != config.browser for b in installed):
+            choices.append((config.browser, f"{config.browser} (not installed)", False))
+
+        row = first_row + 1
+        for value, text, enabled in choices:
+            ttk.Radiobutton(
+                body,
+                text=text,
+                value=value,
+                variable=self.browser,
+                state=tk.NORMAL if enabled else tk.DISABLED,
+                style="Zap.TRadiobutton",
+            ).grid(row=row, column=0, columnspan=2, sticky="w")
+            row += 1
+        return row
+
     def _save(self) -> None:
         self._config.player = self.player.get()
         self._config.auto_update = bool(self.auto_update.get())
         self._config.theme = self.theme_name.get()
         self._config.show_logos = bool(self.show_logos.get())
         self._config.check_updates = bool(self.check_updates.get())
+        self._config.browser = self.browser.get()
         self._config.save()
         self._on_save(self._config)
         self.destroy()
@@ -1483,7 +1530,7 @@ class ChannelBrowser(tk.Frame):
         """Bind a menu entry to one channel and one player."""
 
         def command() -> None:
-            self._play(channel, get_player(player_name))
+            self._play(channel, self._backend(player_name))
 
         return command
 
@@ -1504,8 +1551,19 @@ class ChannelBrowser(tk.Frame):
         open in a browser however the user configured VLC or mpv.
         """
         if channel.player:
-            return get_player(channel.player)
+            return self._backend(channel.player)
         return self._player
+
+    def _backend(self, name: str) -> Player:
+        """A named player, configured as the user asked.
+
+        Only the browser takes configuration: which browser web channels
+        open in. Read at play time, so a change in settings applies to the
+        very next channel without a restart.
+        """
+        if name == "browser":
+            return BrowserPlayer(self._config.browser)
+        return get_player(name)
 
     def _on_toggle_favorite(self, _event: object = None) -> str:
         channel = self.selected()
@@ -1546,7 +1604,7 @@ class ChannelBrowser(tk.Frame):
         def command() -> None:
             channel = self.selected()
             if channel is not None:
-                self._play(channel, get_player(player_name))
+                self._play(channel, self._backend(player_name))
 
         return command
 

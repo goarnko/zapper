@@ -108,6 +108,17 @@ def _print_players() -> int:
         state = "installed" if backend.is_available() else "missing  "
         role = "selectable" if name in player_module.SELECTABLE else "per-channel"
         print(f"{state}  {name:8} {backend.label:14} ({role})")
+
+    # Which browser web channels open in is its own choice, made in settings.
+    from . import browsers
+
+    config = Settings.load()
+    default = browsers.system_default()
+    for browser in browsers.installed():
+        marks = [m for m, on in (("default", browser.id == default),
+                                 ("chosen", browser.id == config.browser)) if on]
+        note = f" ({', '.join(marks)})" if marks else ""
+        print(f"browser    {browser.id:30} {browser.name}{note}")
     return 0
 
 

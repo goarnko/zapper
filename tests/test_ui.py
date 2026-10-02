@@ -748,3 +748,100 @@ def test_enabling_a_regional_list_fetches_its_guide(tmp_path, monkeypatch):
         assert requested[-1] == []
     finally:
         root.destroy()
+
+
+# -- choosing a browser --------------------------------------------------
+
+
+def _fake_browsers(monkeypatch):
+    from zaptv import browsers
+
+    found = [
+        browsers.Browser("firefox_firefox.desktop", "Firefox", "/snap/bin/firefox %u"),
+        browsers.Browser("opera_opera.desktop", "Opera", "/snap/bin/opera %U"),
+    ]
+    monkeypatch.setattr(browsers, "installed", lambda dirs=None: found)
+    monkeypatch.setattr(browsers, "system_default", lambda: "firefox_firefox.desktop")
+
+
+def _radios(window):
+    from tkinter import ttk
+
+    body = window.winfo_children()[0]
+    return [w for w in body.winfo_children() if isinstance(w, ttk.Radiobutton)]
+
+
+def test_settings_offer_every_browser_and_save_the_choice(monkeypatch):
+    if not _tk_available():
+        return
+
+    import tkinter as tk
+
+    from zaptv import theme, ui
+    from zaptv.settings import Settings
+
+    _fake_browsers(monkeypatch)
+    saved = []
+    monkeypatch.setattr(Settings, "save", lambda self, path=None: saved.append(self.browser))
+
+    root = tk.Tk()
+    try:
+        config = Settings()
+        window = ui.SettingsWindow(root, config, theme.get("light"), lambda _c: None)
+        texts = [r.cget("text") for r in _radios(window)]
+        assert "System default (Firefox)" in texts
+        assert "Opera" in texts
+
+        window.browser.set("opera_opera.desktop")
+        window._save()
+        assert saved == ["opera_opera.desktop"]
+        assert config.browser == "opera_opera.desktop"
+    finally:
+        root.destroy()
+
+
+def test_an_uninstalled_choice_stays_visible_but_disabled(monkeypatch):
+    if not _tk_available():
+        return
+
+    import tkinter as tk
+
+    from zaptv import theme, ui
+    from zaptv.settings import Settings
+
+    _fake_browsers(monkeypatch)
+    root = tk.Tk()
+    try:
+        config = Settings(browser="brave-browser.desktop")
+        window = ui.SettingsWindow(root, config, theme.get("light"), lambda _c: None)
+        (gone,) = [r for r in _radios(window) if "brave" in r.cget("text")]
+        assert gone.cget("text") == "brave-browser.desktop (not installed)"
+        assert str(gone.cget("state")) == "disabled"
+    finally:
+        root.destroy()
+
+
+def test_web_channels_use_the_configured_browser():
+    """Read at play time, so a settings change applies to the next channel."""
+    if not _tk_available():
+        return
+
+    import tkinter as tk
+
+    from zaptv.models import Channel
+    from zaptv.player import BrowserPlayer
+    from zaptv.settings import Settings
+
+    root = tk.Tk()
+    try:
+        settings = Settings(show_logos=False)
+        browser = _browser_with_groups(root, settings)
+        web = Channel(name="TF1", group="France", streams=["https://x.invalid"], player="browser")
+
+        assert browser._player_for(web).browser == ""
+        settings.browser = "opera_opera.desktop"
+        chosen = browser._player_for(web)
+        assert isinstance(chosen, BrowserPlayer)
+        assert chosen.browser == "opera_opera.desktop"
+    finally:
+        root.destroy()

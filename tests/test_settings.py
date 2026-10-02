@@ -59,3 +59,21 @@ def test_a_list_of_non_strings_is_ignored(tmp_path):
     path = tmp_path / "settings.json"
     path.write_text('{"collapsed_groups": [1, 2, null]}', encoding="utf-8")
     assert Settings.load(path).collapsed_groups == []
+
+
+def test_browser_defaults_to_the_desktop_default(tmp_path):
+    assert Settings.load(tmp_path / "absent.json").browser == ""
+
+
+def test_browser_choice_round_trips(tmp_path):
+    path = tmp_path / "settings.json"
+    Settings(browser="opera_opera.desktop").save(path)
+    assert Settings.load(path).browser == "opera_opera.desktop"
+
+
+def test_a_non_string_browser_is_dropped(tmp_path):
+    path = tmp_path / "settings.json"
+    path.write_text('{"browser": ["firefox"], "theme": "dark"}', encoding="utf-8")
+    loaded = Settings.load(path)
+    assert loaded.browser == ""
+    assert loaded.theme == "dark", "one bad field must not cost the others"

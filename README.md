@@ -169,6 +169,12 @@ iPlayer also expects a UK TV licence. Enabling a list also turns on its guide, s
 appears for nearly all of them — from [xmltvfr.fr](https://xmltvfr.fr) for France and
 epgshare01 for the UK. While a list is disabled, its guide is not downloaded.
 
+## Choosing a browser
+
+Web channels open in your desktop's default browser. With more than one installed, pick
+which one under **Settings → Web channels open in** (`Ctrl+,`). ZapTV lists the browsers
+your desktop knows about, snaps and flatpaks included; `zaptv --players` shows them too.
+
 ## Updates
 
 ZapTV checks once a day whether a newer release exists and mentions it in the status bar.

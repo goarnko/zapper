@@ -78,11 +78,31 @@ class BrowserPlayer(Player):
     command = "xdg-open"
     label = "Web browser"
 
+    def __init__(self, browser: str = ""):
+        #: Desktop-file id of the browser to use; empty means the system
+        #: default. See browsers.py.
+        self.browser = browser
+
     def args(self, page_url: str) -> list[str]:
         return [self.executable(), page_url]
 
     def play(self, page_url: str) -> subprocess.Popen[bytes] | None:
-        """Hand the page to the desktop, falling back to Python's own opener."""
+        """Open the page in the chosen browser, else the system default.
+
+        A chosen browser that has since been uninstalled falls through to the
+        default rather than failing: the page still opens, and the settings
+        window shows the choice as no longer installed.
+        """
+        from . import browsers
+
+        chosen = browsers.find(self.browser)
+        if chosen is not None:
+            return subprocess.Popen(
+                chosen.args(page_url),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
         if self.is_available():
             return super().play(page_url)
         # Minimal desktops may lack xdg-open; webbrowser knows other ways.

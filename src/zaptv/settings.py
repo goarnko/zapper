@@ -27,6 +27,9 @@ class Settings:
     #: Ask GitHub, at most daily, whether a newer ZapTV was released. This
     #: only reports; nothing is downloaded or replaced.
     check_updates: bool = True
+    #: Desktop-file id of the browser web channels open in, e.g.
+    #: "firefox_firefox.desktop". Empty means the desktop's default.
+    browser: str = ""
     #: Section labels the user has collapsed in the channel list, as they
     #: appear there (group names uppercased). Absent means expanded, so a
     #: settings file from an older version opens everything as before.
@@ -65,6 +68,10 @@ class Settings:
                 isinstance(value, list) and all(isinstance(g, str) for g in value)
             ):
                 del kept[name]
+
+        # A non-string would reach Path/str operations only at play time.
+        if not isinstance(kept.get("browser", ""), str):
+            del kept["browser"]
 
         return cls(**kept)
 
