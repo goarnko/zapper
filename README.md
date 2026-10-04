@@ -17,6 +17,7 @@ Channels come from the [TDTChannels](https://www.tdtchannels.com/) playlist and 
 versions along with the rest of your system:
 
 ```bash
+sudo apt install -y curl gpg
 sudo install -d -m 0755 /etc/apt/keyrings
 curl -fsSL https://goarnko.github.io/zapper/zaptv.asc \
   | sudo gpg --dearmor -o /etc/apt/keyrings/zaptv.gpg
@@ -29,6 +30,10 @@ sudo apt update && sudo apt install zaptv
 
 Packages are GPG-signed and apt verifies them; the repository is rebuilt from the published
 releases on every tag.
+
+The first line matters on minimal installs: without `curl`, the key download fails silently
+inside the pipe, `gpg` writes an empty keyring, and `apt update` then reports the repository
+as not signed.
 
 **Build the Debian package yourself** — installs the launcher, desktop entry and icons:
 
