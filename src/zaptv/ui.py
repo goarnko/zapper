@@ -17,11 +17,12 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter import font as tkfont
 
-from . import __version__, grid, search, theme, updater, webchannels
+from . import __version__, grid, search, theme, webchannels
 from . import browsers as browsers_module
 from . import epg as epg_module
 from . import logos as logos_module
 from . import providers as providers_module
+from . import refresh as refresh_module
 from . import updates as updates_module
 from .models import Channel, Programme
 from .player import (
@@ -48,6 +49,8 @@ GUIDE_TICK_MS = 60_000
 LOGO_TICK_MS = 400
 #: How often the background update check is polled for its answer.
 UPDATE_TICK_MS = 1000
+#: How often to look for a finished background refresh.
+REFRESH_TICK_MS = 200
 #: Descriptions run to several hundred characters; the pane shows three lines.
 DESCRIPTION_LIMIT = 165
 
@@ -1089,6 +1092,11 @@ class ChannelBrowser(tk.Frame):
         self._images: dict[str, tk.PhotoImage] = {}
 
         self._updates: queue.Queue[updates_module.Release | None] | None = None
+        #: The running background refresh, if any; see start_refresh.
+        self._refreshing: queue.Queue[refresh_module.Refreshed] | None = None
+        #: A refresh asked for while one was running: None for none, else
+        #: whether any of the requests wanted a forced download.
+        self._pending_force: bool | None = None
 
         #: Treeview row id -> channel. Headers are absent, which is what makes
         #: them unselectable.
@@ -1150,8 +1158,11 @@ class ChannelBrowser(tk.Frame):
         self.guide_pane = GuidePane(self, self._palette)
         self.guide_pane.pack(fill=tk.X, pady=(6, 0))
 
-        self.status = tk.Label(self, anchor="w")
+        self.status = tk.Label(self, anchor="w", justify=tk.LEFT)
         self.status.pack(fill=tk.X, pady=(6, 0))
+        # Wrap rather than cut off: refresh reports name providers, and a
+        # provider's name can be any length.
+        self.status.bind("<Configure>", lambda e: self.status.config(wraplength=e.width))
 
         self.tree.bind("<Double-Button-1>", self._on_play)
         self.tree.bind("<Return>", self._on_play)
@@ -1369,8 +1380,12 @@ class ChannelBrowser(tk.Frame):
             # around the selection stay in view — and only a row that is
             # actually on screen, because see() opens a row's ancestors and
             # would quietly re-expand a section the user had collapsed.
+            # Matched on (name, group), the key playlists merge on, not on
+            # identity: a background refresh brings brand-new Channel objects.
+            key = (previous.name, previous.group)
             for item in reversed(self._row_order):
-                if self._rows[item] is previous and self._is_visible(item):
+                row = self._rows[item]
+                if (row.name, row.group) == key and self._is_visible(item):
                     target = item
                     break
 
@@ -1628,54 +1643,76 @@ class ChannelBrowser(tk.Frame):
     def open_providers(self, _event: object = None) -> str:
         if self._sources is None:
             return "break"
-        ProvidersWindow(self, self._sources, self._palette, self._reload_channels)
+        ProvidersWindow(self, self._sources, self._palette, self.start_refresh)
         return "break"
 
-    def _reload_channels(self, force: bool = False) -> None:
-        """Re-read channels from the configured providers.
+    def start_refresh(self, force: bool = False) -> None:
+        """Bring playlists and guides up to date without blocking the window.
 
-        Keeps the current list when every source fails, so a dropped network
-        never empties the window.
+        The download runs on a daemon thread (refresh.refresh_async) and
+        _tick_refresh swaps the result in. One at a time: a request made
+        while a refresh runs is remembered and run straight afterwards, so
+        a provider enabled meanwhile is not lost and two workers never race
+        on the same cache files.
         """
         if self._sources is None:
             return
-
-        self.status.config(text="Loading playlists…")
-        self.update_idletasks()
-        max_age = 0 if force else updater.MAX_AGE_SECONDS
-        channels, failed = self._sources.load_channels(max_age=max_age)
-        if channels:
-            self._channels = channels
-
-        self._refresh()
-        if failed:
-            self.status.config(text=f"Unavailable: {', '.join(failed)}")
-            self.update_idletasks()
-
+        if self._refreshing is not None:
+            self._pending_force = force or bool(self._pending_force)
+            return
         # Enabling a regional list brings its guide feed with it; disabling
         # one drops it, so its listings stop being downloaded.
-        wanted = webchannels.guide_sources(self._sources)
-        if wanted != self._guide_sources:
-            self._guide_sources = wanted
-            self._guide = epg_module.load_all(updater.ensure_epgs(extra=wanted))
-            self._update_guide()
+        self._guide_sources = webchannels.guide_sources(self._sources)
+        self._refreshing = refresh_module.refresh_async(
+            self._sources.enabled, self._guide_sources, force
+        )
+        self.status.config(
+            text="Updating playlists…" if self._channels else "Loading playlists…"
+        )
+        self.after(REFRESH_TICK_MS, self._tick_refresh)
+
+    def _tick_refresh(self) -> None:
+        if self._refreshing is None:
+            return
+        try:
+            result = self._refreshing.get_nowait()
+        except queue.Empty:
+            self.after(REFRESH_TICK_MS, self._tick_refresh)
+            return
+        self._refreshing = None
+        self._apply_refresh(result)
+        if self._pending_force is not None:
+            force, self._pending_force = self._pending_force, None
+            self.start_refresh(force)
+
+    def _apply_refresh(self, result: refresh_module.Refreshed) -> None:
+        """Swap a finished refresh in, keeping whatever it could not replace.
+
+        A dropped network never empties the window: with no channels back,
+        the current list stays, and with no guide back, the current guide.
+        """
+        if result.channels:
+            self._channels = result.channels
+        if result.guide is not None:
+            self._guide = result.guide
+        self._refresh()
+        self._update_guide()
+        problems = []
+        if result.failed:
+            problems.append(f"Unavailable: {', '.join(result.failed)}")
+        for name, mtime in result.outdated:
+            when = datetime.fromtimestamp(mtime)
+            problems.append(f"{name} not updated since {when.day} {when:%b}")
+        if not self._channels:
+            self.status.config(text="No playlist could be downloaded. Ctrl+R retries.")
+        elif problems:
+            self.status.config(text=" · ".join(problems))
+        elif result.guide is None:
+            self.status.config(text="Channel lists updated; guide unavailable")
 
     def reload(self, _event: object = None) -> str:
-        """Force a refresh of every playlist and the guide."""
-        self._reload_channels(force=True)
-
-        # The guide is optional: a failure here should not spoil a successful
-        # playlist refresh, so it is reported only in the status line.
-        # download_epgs keeps whatever succeeded rather than raising, so an
-        # empty list — not an exception — is what "no guide at all" looks
-        # like. One source failing while another works is silent on purpose:
-        # the user loses some channels' listings, not the feature.
-        paths = updater.download_epgs(extra=self._guide_sources)
-        self._guide = epg_module.load_all(paths)
-        self._update_guide()
-        if not paths:
-            self.status.config(text="Channel lists updated; guide unavailable")
-            self.update_idletasks()
+        """Force a refresh of every playlist and the guide (Ctrl+R)."""
+        self.start_refresh(force=True)
         return "break"
 
 
@@ -1812,6 +1849,9 @@ def run(
         )
 
     browser.tree.focus_set()
+    # The window opens on whatever was cached; downloading happens behind it.
+    if config.auto_update:
+        browser.start_refresh()
     try:
         root.mainloop()
     finally:

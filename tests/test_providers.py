@@ -242,3 +242,24 @@ def test_migration_leaves_an_existing_cache_alone(tmp_path, monkeypatch):
 
     providers.migrate_legacy_cache()
     assert target.read_text(encoding="utf-8") == "current"
+
+
+def test_offline_loading_reads_caches_and_never_downloads(tmp_path, monkeypatch):
+    monkeypatch.setattr(updater, "CACHE_DIR", tmp_path / "cache")
+
+    def no_network(*_args, **_kwargs):
+        raise AssertionError("offline loading must not download")
+
+    monkeypatch.setattr(updater, "fetch", no_network)
+    cached = Provider("Cached", "https://a.invalid/x.m3u")
+    cached.cache_path.parent.mkdir(parents=True)
+    cached.cache_path.write_text(
+        '#EXTM3U\n#EXTINF:-1 group-title="G",Uno\nhttps://x.invalid/1\n', encoding="utf-8"
+    )
+    missing = Provider("Missing", "https://b.invalid/x.m3u")
+    listing = ProviderList([cached, missing], tmp_path / "p.json")
+
+    channels, failed = listing.load_channels(offline=True)
+
+    assert [c.name for c in channels] == ["Uno"]
+    assert failed == ["Missing"]

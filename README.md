@@ -132,7 +132,7 @@ Guide data covers about a quarter of the channel list — the playlist rarely ca
 
 ## Files
 
-The playlist is cached in `~/.local/share/zaptv/` and refreshed automatically when it is more than 24 hours old. Settings, favorites and recents live in `~/.config/zaptv/`.
+The playlist is cached in `~/.local/share/zaptv/` and refreshed automatically when it is more than 24 hours old. ZapTV opens straight away on the saved copy and refreshes in the background; if a source cannot be reached, you keep the saved list and the status bar says which source is out of date. Settings, favorites and recents live in `~/.config/zaptv/`.
 
 ## Appearance
 

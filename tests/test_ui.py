@@ -8,6 +8,7 @@ display, so headless runs stay green.
 """
 
 import os
+import threading
 
 
 def _tk_available() -> bool:
@@ -711,41 +712,275 @@ def test_enabling_a_regional_list_fetches_its_guide(tmp_path, monkeypatch):
 
     import tkinter as tk
 
-    from zaptv import epg, ui, updater, webchannels
-    from zaptv.models import Channel
-    from zaptv.player import VLCPlayer
+    from zaptv import refresh, webchannels
     from zaptv.providers import ProviderList
-    from zaptv.settings import Settings
-    from zaptv.storage import Favorites, Recent
 
     sources = ProviderList([], tmp_path / "p.json")
     webchannels.install_regional(sources, tmp_path)
-    channels = [Channel(name="Alfa", group="Uno", streams=["https://x.invalid/1"])]
-    monkeypatch.setattr(sources, "load_channels", lambda max_age=0: (channels, []))
     requested = []
 
-    def ensure_epgs(max_age=updater.MAX_AGE_SECONDS, extra=()):
+    def fake(providers, extra, force):
         requested.append(list(extra))
-        return []
+        return refresh.Refreshed([], [], None)
 
-    monkeypatch.setattr(updater, "ensure_epgs", ensure_epgs)
+    monkeypatch.setattr(refresh, "refresh", fake)
 
     root = tk.Tk()
     try:
-        browser = ui.ChannelBrowser(
-            root, channels, VLCPlayer(), Favorites([]), Recent([]), epg.Guide(),
-            Settings(show_logos=False), None, sources,
-        )
-        browser._reload_channels()
-        assert requested == [], "nothing changed, so the guide must not be refetched"
+        browser = _refreshing_browser(root, [], sources)
+        browser.start_refresh()
+        _settle(root, browser)
+        assert requested == [[]], "regional lists start disabled: no extra feeds"
 
         sources.set_enabled(webchannels.FRANCE.provider, True)
-        browser._reload_channels()
-        assert requested == [[webchannels.FRANCE.guide]]
+        browser.start_refresh()
+        _settle(root, browser)
+        assert requested[-1] == [webchannels.FRANCE.guide]
 
         sources.set_enabled(webchannels.FRANCE.provider, False)
-        browser._reload_channels()
+        browser.start_refresh()
+        _settle(root, browser)
         assert requested[-1] == []
+    finally:
+        root.destroy()
+
+
+# -- background refresh ----------------------------------------------------
+
+
+def _refreshing_browser(root, channels, sources=None):
+    import tempfile
+    from pathlib import Path
+
+    from zaptv import ui
+    from zaptv.player import VLCPlayer
+    from zaptv.providers import Provider, ProviderList
+    from zaptv.settings import Settings
+    from zaptv.storage import Favorites, Recent
+
+    if sources is None:
+        # Never the default path: that is the developer's own providers.json.
+        path = Path(tempfile.mkdtemp()) / "providers.json"
+        sources = ProviderList([Provider("TDT", "https://lists.invalid/tv.m3u")], path)
+    browser = ui.ChannelBrowser(
+        root, channels, VLCPlayer(), Favorites([]), Recent([]), None,
+        Settings(show_logos=False), None, sources,
+    )
+    browser.pack()
+    root.update()
+    return browser
+
+
+def _settle(root, browser, timeout=5.0):
+    """Pump Tk until the refresh, and any queued one, has been applied."""
+    import time
+
+    deadline = time.monotonic() + timeout
+    while browser._refreshing is not None or browser._pending_force is not None:
+        assert time.monotonic() < deadline, "the refresh never finished"
+        root.update()
+        time.sleep(0.01)
+    root.update()
+
+
+def _channels(*names):
+    from zaptv.models import Channel
+
+    return [Channel(name=n, group="Uno", streams=[f"https://x.invalid/{n}"]) for n in names]
+
+
+def test_a_refresh_swaps_in_new_channels_and_keeps_the_selection(monkeypatch):
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv import epg, refresh
+
+    guide = epg.Guide()
+    monkeypatch.setattr(
+        refresh, "refresh",
+        lambda providers, extra, force: refresh.Refreshed(
+            _channels("Alfa", "Beta", "Gamma"), [], guide),
+    )
+    root = tk.Tk()
+    try:
+        browser = _refreshing_browser(root, _channels("Alfa", "Beta"))
+        beta = next(i for i, c in browser._rows.items() if c.name == "Beta")
+        browser.tree.selection_set(beta)
+
+        browser.start_refresh()
+        _settle(root, browser)
+
+        assert sorted(c.name for c in browser._rows.values()) == ["Alfa", "Beta", "Gamma"]
+        assert browser.selected().name == "Beta"
+        assert browser._guide is guide
+        assert browser.status.cget("text") == "3 channels"
+    finally:
+        root.destroy()
+
+
+def test_a_failed_refresh_keeps_the_list_and_names_the_source(monkeypatch):
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv import epg, refresh
+
+    monkeypatch.setattr(
+        refresh, "refresh",
+        lambda providers, extra, force: refresh.Refreshed([], ["TDT"], None),
+    )
+    root = tk.Tk()
+    try:
+        browser = _refreshing_browser(root, _channels("Alfa", "Beta"))
+        guide_before = browser._guide
+
+        browser.start_refresh()
+        _settle(root, browser)
+
+        assert sorted(c.name for c in browser._rows.values()) == ["Alfa", "Beta"]
+        assert browser._guide is guide_before
+        assert "Unavailable: TDT" in browser.status.cget("text")
+        assert isinstance(browser._guide, epg.Guide)
+    finally:
+        root.destroy()
+
+
+def test_an_outdated_list_is_named_with_its_date(monkeypatch):
+    if not _tk_available():
+        return
+    import tkinter as tk
+    from datetime import datetime
+
+    from zaptv import refresh
+
+    when = datetime(2026, 10, 7, 13, 18).timestamp()
+    monkeypatch.setattr(
+        refresh, "refresh",
+        lambda providers, extra, force: refresh.Refreshed(
+            _channels("Alfa"), ["Blackhole"], None, [("TDTChannels", when)]),
+    )
+    root = tk.Tk()
+    try:
+        browser = _refreshing_browser(root, _channels("Alfa"))
+        browser.start_refresh()
+        _settle(root, browser)
+
+        text = browser.status.cget("text")
+        assert "Unavailable: Blackhole" in text
+        assert "TDTChannels not updated since 7 Oct" in text
+    finally:
+        root.destroy()
+
+
+def test_the_status_bar_wraps_to_the_window_width():
+    """A report naming several providers must wrap, not be cut off."""
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    root = tk.Tk()
+    root.geometry("420x640")
+    try:
+        browser = _refreshing_browser(root, _channels("Alfa"))
+        browser.pack(fill=tk.BOTH, expand=True)
+        root.update()
+        width = browser.status.winfo_width()
+        assert width > 1
+        assert int(browser.status.cget("wraplength")) == width
+    finally:
+        root.destroy()
+
+
+def test_an_empty_window_says_what_happened(monkeypatch):
+    """First launch with no cache: a window explaining itself, not nothing."""
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv import refresh
+
+    release = threading.Event()
+
+    def slow(providers, extra, force):
+        release.wait(5)
+        return refresh.Refreshed([], ["TDT"], None)
+
+    monkeypatch.setattr(refresh, "refresh", slow)
+    root = tk.Tk()
+    try:
+        browser = _refreshing_browser(root, [])
+        browser.start_refresh()
+        assert browser.status.cget("text") == "Loading playlists…"
+
+        release.set()
+        _settle(root, browser)
+        assert "No playlist could be downloaded" in browser.status.cget("text")
+        assert "Ctrl+R" in browser.status.cget("text")
+    finally:
+        root.destroy()
+
+
+def test_requests_during_a_refresh_run_once_afterwards(monkeypatch):
+    """Not dropped (a provider just enabled would be lost), not run in
+    parallel (two workers would race on the cache files)."""
+    if not _tk_available():
+        return
+    import tkinter as tk
+
+    from zaptv import refresh
+
+    release = threading.Event()
+    forces = []
+
+    def slow(providers, extra, force):
+        forces.append(force)
+        release.wait(5)
+        return refresh.Refreshed(_channels("Alfa"), [], None)
+
+    monkeypatch.setattr(refresh, "refresh", slow)
+    root = tk.Tk()
+    try:
+        browser = _refreshing_browser(root, _channels("Alfa"))
+        browser.start_refresh(force=False)
+        browser.start_refresh(force=True)
+        browser.start_refresh(force=False)
+        release.set()
+        _settle(root, browser)
+
+        assert forces == [False, True]
+    finally:
+        root.destroy()
+
+
+def test_ctrl_r_returns_at_once_while_the_download_runs(monkeypatch):
+    if not _tk_available():
+        return
+    import time
+    import tkinter as tk
+
+    from zaptv import refresh
+
+    release = threading.Event()
+    forces = []
+
+    def slow(providers, extra, force):
+        forces.append(force)
+        release.wait(5)
+        return refresh.Refreshed(_channels("Alfa"), [], None)
+
+    monkeypatch.setattr(refresh, "refresh", slow)
+    root = tk.Tk()
+    try:
+        browser = _refreshing_browser(root, _channels("Alfa"))
+        started = time.monotonic()
+        assert browser.reload() == "break"
+        assert time.monotonic() - started < 0.5
+        assert browser.status.cget("text") == "Updating playlists…"
+
+        release.set()
+        _settle(root, browser)
+        assert forces == [True]
     finally:
         root.destroy()
 

@@ -1,4 +1,4 @@
-"""Entry point: refresh the playlist if stale, parse it, show the list."""
+"""Entry point: show the cached list at once (or print it, refreshed, for the CLI)."""
 
 import sys
 
@@ -43,13 +43,21 @@ def main(argv: list[str] | None = None) -> int:
     if "--check-updates" in argv:
         return _print_update_check()
 
-    channels, failed = sources.load_channels(refresh=config.auto_update)
-    for name in failed:
-        print(f"Provider unavailable: {name}", file=sys.stderr)
-
-    if not channels:
-        print("No channels from any enabled provider.", file=sys.stderr)
-        return 1
+    # The window opens on the caches and refreshes behind itself (see
+    # refresh.py): downloading first left no window at all for minutes when
+    # a host did not answer. The text modes have nothing to show early and
+    # must print fresh data, so they still refresh before printing.
+    gui = not any(flag in argv for flag in ("--list", "--search", "--now"))
+    if gui:
+        channels, failed = sources.load_channels(offline=True)
+    else:
+        channels, failed = sources.load_channels(refresh=config.auto_update)
+    if not gui:
+        for name in failed:
+            print(f"Provider unavailable: {name}", file=sys.stderr)
+        if not channels:
+            print("No channels from any enabled provider.", file=sys.stderr)
+            return 1
 
     if "--search" in argv:
         index = argv.index("--search")
@@ -81,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    guide = _load_guide(config, sources)
+    guide = _load_guide(config, sources, refresh=False)
     ui.run(channels, config, Favorites.load(), Recent.load(), guide, sources)
     return 0
 
@@ -132,14 +140,17 @@ def _print_providers(sources: "providers.ProviderList") -> int:
     return 0
 
 
-def _load_guide(config: Settings, sources: "providers.ProviderList") -> epg.Guide:
+def _load_guide(
+    config: Settings, sources: "providers.ProviderList", refresh: bool = True
+) -> epg.Guide:
     """Fetch and parse the guide, tolerating its absence.
 
     The guide is a nice-to-have: every failure here degrades to an empty
-    Guide, and the app still lists and plays channels.
+    Guide, and the app still lists and plays channels. `refresh=False` reads
+    only the caches, for the window, which refreshes them in the background.
     """
     extra = webchannels.guide_sources(sources)
-    if config.auto_update:
+    if config.auto_update and refresh:
         return epg.load_all(updater.ensure_epgs(extra=extra))
 
     updater.migrate_legacy_epg()

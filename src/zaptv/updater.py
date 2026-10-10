@@ -40,7 +40,11 @@ PLAYLIST_PATH = CACHE_DIR / "playlist.m3u"
 EPG_PATH = CACHE_DIR / "epg.xml.gz"
 
 MAX_AGE_SECONDS = 24 * 60 * 60
-_TIMEOUT = 30
+#: Per connection attempt and per read, not for the whole download, so a
+#: slow but live feed is unaffected. A host's addresses are tried in turn, so
+#: an unreachable one with four costs 40 s; nothing waits on that any more,
+#: since the window refreshes in the background (refresh.py).
+_TIMEOUT = 10
 _USER_AGENT = "zaptv/0.1 (+https://github.com/goarnko/zapper)"
 
 

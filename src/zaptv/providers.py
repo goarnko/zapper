@@ -10,7 +10,7 @@ invalidates another's channels.
 
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from urllib.parse import urlparse
@@ -77,6 +77,11 @@ class Provider:
             return updater.ensure(self.cache_path, max_age, self.url)
         except OSError:
             return None
+
+    def cached(self) -> Path | None:
+        """Like resolve, but never downloads: the cache or nothing."""
+        path = self.local_path if self.is_local else self.cache_path
+        return path if path.exists() else None
 
 
 def migrate_legacy_cache() -> None:
@@ -204,33 +209,71 @@ class ProviderList:
     # -- loading ---------------------------------------------------------
 
     def load_channels(
-        self, max_age: int = updater.MAX_AGE_SECONDS, refresh: bool = True
+        self,
+        max_age: int = updater.MAX_AGE_SECONDS,
+        refresh: bool = True,
+        offline: bool = False,
     ) -> tuple[list[Channel], list[str]]:
         """Channels from every enabled provider, merged.
 
         Returns the channels and the names of providers that yielded nothing,
         so the UI can say which source is broken instead of silently showing
-        a shorter list.
+        a shorter list. `refresh=False` skips refreshing a stale cache but
+        still downloads a missing one; `offline=True` never downloads at all,
+        which is what the window needs before it exists.
         """
-        from . import playlist
+        return load_from(self.enabled, max_age if refresh else _NEVER_STALE, offline)
 
-        migrate_legacy_cache()
 
-        sources: list[list[Channel]] = []
-        failed: list[str] = []
-        for provider in self.enabled:
-            path = provider.resolve(max_age if refresh else _NEVER_STALE)
-            if path is None:
-                failed.append(provider.name)
-                continue
-            try:
-                channels = playlist.load(path, provider.name)
-            except OSError:
-                failed.append(provider.name)
-                continue
-            if channels:
-                sources.append(channels)
-            else:
-                failed.append(provider.name)
+def load_from(
+    providers: Iterable[Provider],
+    max_age: int = updater.MAX_AGE_SECONDS,
+    offline: bool = False,
+    outdated: list[tuple[str, float]] | None = None,
+) -> tuple[list[Channel], list[str]]:
+    """Channels from the given providers, merged in order; see load_channels.
 
-        return playlist.merge(sources), failed
+    Separate from ProviderList so a background refresh can run over a
+    snapshot of the providers, which the playlists window may edit meanwhile.
+
+    `outdated`, when given, collects (name, cache mtime) for each provider
+    that was due a download, could not get one, and was loaded from its old
+    cache instead. updater.ensure counts that fallback as success, rightly,
+    since the channels are usable; but the user should know the list is old.
+    """
+    from . import playlist
+
+    migrate_legacy_cache()
+
+    sources: list[list[Channel]] = []
+    failed: list[str] = []
+    for provider in providers:
+        due = not offline and not provider.is_local
+        before = _mtime(provider.cache_path) if due else None
+        due = due and before is not None and updater.is_stale(provider.cache_path, max_age)
+        path = provider.cached() if offline else provider.resolve(max_age)
+        if path is None:
+            failed.append(provider.name)
+            continue
+        try:
+            channels = playlist.load(path, provider.name)
+        except OSError:
+            failed.append(provider.name)
+            continue
+        if channels:
+            sources.append(channels)
+            # The download was due and the file is untouched: it fell back.
+            fell_back = due and _mtime(provider.cache_path) == before
+            if fell_back and outdated is not None and before is not None:
+                outdated.append((provider.name, before))
+        else:
+            failed.append(provider.name)
+
+    return playlist.merge(sources), failed
+
+
+def _mtime(path: Path) -> float | None:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return None

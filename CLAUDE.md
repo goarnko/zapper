@@ -74,7 +74,7 @@ Groups (and Favorites/Recent) expand and collapse, and the collapsed set persist
 - **Collapsing moves the selection out of the closed section**, otherwise Enter would play a channel that is no longer on screen. With everything collapsed it clears the selection instead — better than a hidden channel that Enter still plays.
 - **Missing key means expanded**, so an older `settings.json` opens exactly as before. `Settings.load` drops `collapsed_groups` unless it is a list of strings: a bare string would iterate as characters and "collapse" groups named `A`, `n`, `d`… It is the one field whose wrong type fails quietly rather than loudly.
 
-- The list is rebuilt from scratch on every keystroke, favorite toggle, and play. `_refresh` therefore saves and restores the selection; without that, favoriting throws the user back to the top of ~471 channels.
+- The list is rebuilt from scratch on every keystroke, favorite toggle, and play. `_refresh` therefore saves and restores the selection (by `(name, group)`, so it survives a background refresh replacing every `Channel`); without that, favoriting throws the user back to the top of ~471 channels.
 - **`see()` on an unmapped widget scrolls its target to the very top**, hiding the section header above it — the list then looks unlabelled at startup. `_restore_selection` uses `yview_moveto(0)` when nothing carried over (startup, or a search that dropped the selection) and only calls `see()` when genuinely restoring a selection, by which point the widget is mapped. `after_idle` does *not* fix this: idle callbacks run before the window is mapped.
 - A favorited channel appears **twice** — once under `★ FAVORITES`, once in its group. `_restore_selection` scans `_row_order` in reverse so selection lands on the group copy, keeping neighbours in view.
 - Something is always selected, so Enter plays straight after typing a search without an arrow key in between.
@@ -119,9 +119,21 @@ The menu bar (`build_menubar`) adds discovery, not behaviour: every entry calls 
 `providers.py` owns playlist sources. A provider is a name plus an M3U source — an http(s) URL to download or a local file to read (`is_local` covers bare paths and `file://`).
 
 - **Each provider caches separately**, in `playlists/<slug>.m3u`, so one unreachable source never invalidates another's channels.
-- **Failures are reported, not swallowed.** `load_channels` returns `(channels, failed_names)`; the UI puts the failing names in the status bar rather than silently showing a shorter list. An empty playlist counts as a failure.
+- **Failures are reported, not swallowed.** `load_channels` returns `(channels, failed_names)`; the UI puts the failing names in the status bar rather than silently showing a shorter list. An empty playlist counts as a failure. A source whose download fails but whose *old* cache loads is not a failure (`updater.ensure` falls back, rightly), but it is reported too, as "TDTChannels not updated since 7 Oct": `load_from(outdated=...)` spots it by the cache's mtime being unchanged after a download that was due.
 - **Merging happens on `(name, group)`** — the same key `playlist.parse` uses for mirrors within one file. A second source offering the same channel contributes another stream rather than a duplicate row, and the *first* provider to supply a channel owns its metadata, so provider order is preference order. Gaps (missing `tvg_id`/`logo`) are filled from later sources without overwriting.
 - `migrate_legacy_cache` moves the pre-Milestone-5 `playlist.m3u` into the built-in's per-provider cache, so upgrading doesn't force a re-download.
+
+### Startup never waits on the network
+
+On 2026-10-10 ZapTV showed no window at all: `main` downloaded before building it, `www.tdtchannels.com` was unreachable (most likely ISP blocking of Cloudflare during LaLiga matches; unconfirmed), and `create_connection` tries each of the host's **four** addresses with the full timeout in turn, so one file cost ~2 minutes and startup fetches up to five. Design and measurements: `docs/PLAN_STARTUP_FROM_CACHE.md`.
+
+- **The window opens on caches only.** `main` uses `load_channels(offline=True)` (`Provider.cached()`), which never downloads, not even a missing cache: `refresh=False` alone still downloads when there is no file, which would have left a first launch hanging. `refresh=False` keeps that old meaning for the CLI, and `--list`/`--search`/`--now` still refresh before printing.
+- **`refresh.py` downloads and parses on a daemon thread**; `ChannelBrowser.start_refresh` polls the queue (`_tick_refresh`), the `updates.check_async` shape. The worker touches neither Tk nor Pillow. It runs over a **snapshot** of the providers taken on the main thread, because the playlists window can edit the list meanwhile.
+- **One refresh at a time.** A request during a running one sets `_pending_force` and runs straight after: dropping it would lose a provider just enabled, running two would race on the cache files.
+- `Ctrl+R` and the playlists window go through `start_refresh` too; they used to download on the main thread and froze an open window the same way.
+- **A failed refresh keeps what is on screen**, channels and guide alike. `_restore_selection` matches on `(name, group)`, not identity, because a refresh brings new `Channel` objects; matching by `is` threw the selection to the top.
+- `_TIMEOUT` is 10 s (was 30). It is per connection attempt and per read, not per download, and nothing waits on it any more; it only decides how soon the status bar can say a source is unavailable.
+- Verified for real with a provider at `10.255.255.1` (drops silently): the old code showed no window within 45 s, the new one in 0.7 s. Reproduce that way rather than waiting for a real outage.
 
 This is the machinery the Atresmedia/Mediaset note under Milestone 5 refers to: pointing ZapTV at a list carrying working URLs for those channels works end to end (verified with a local M3U adding Antena 3).
 
@@ -168,7 +180,7 @@ All three pass; keep them passing.
 
     The ordering test is the one that matters and was checked by reverting the fix — moving the call after `thread.start()` makes it fail. A test that only asserts the formats are registered would pass either way. A green local mypy is therefore not proof — CI caught two real errors in `logos.convert` this way (`convert()` returns `Image`, not `ImageFile`, and `Image.LANCZOS` is a legacy alias the stubs do not declare; use `Image.Resampling.LANCZOS`). To reproduce CI locally, unzip a Pillow wheel and point `MYPYPATH` at it, then read only the `src/`- and `tests/`-prefixed errors.
   - `logos.LogoSource` is a `Protocol` covering just `path_for`/`drain`. `ChannelBrowser` takes that rather than `LogoStore`, so test doubles satisfy it structurally instead of needing a cast.
-- **pytest** — 302 unit tests, plus 7 integration tests that are **off unless `ZAPTV_INTEGRATION=1`**. (Those seven gate with `if not ENABLED: return` inside each body rather than a skip marker, so a normal run reports 309 passed and no skips — they are off, but the count gives no sign of it.) Those hit the live feeds and assert loose bounds (≥250 channels, ≥1000 programmes, playlist and guide still share tvg-ids, broadcaster pages still 200, regional guides still carry their ids). They exist to catch the feed changing shape, which no unit test can. CI runs them weekly and on demand, never on a PR.
+- **pytest** — 328 unit tests, plus 7 integration tests that are **off unless `ZAPTV_INTEGRATION=1`**. (Those seven gate with `if not ENABLED: return` inside each body rather than a skip marker, so a normal run reports 335 passed and no skips — they are off, but the count gives no sign of it.) Those hit the live feeds and assert loose bounds (≥250 channels, ≥1000 programmes, playlist and guide still share tvg-ids, broadcaster pages still 200, regional guides still carry their ids). They exist to catch the feed changing shape, which no unit test can. CI runs them weekly and on demand, never on a PR.
 
 **Tests must not depend on what is installed.** Anything touching a player patches `shutil.which` rather than assuming VLC or `xdg-open` exists — CI runners have neither. To check, run the suite with `shutil.which` stubbed to return `None` for `vlc`, `mpv` and `xdg-open`.
 
@@ -217,7 +229,7 @@ A third job publishes `https://goarnko.github.io/zapper` so `apt upgrade` finds 
 
 XDG-split, and both honor their env vars:
 
-- Cache (disposable): `~/.local/share/zaptv/` — `playlists/<slug>.m3u` (one per provider), `epg-<slug>.xml.gz` (one per EPG source), `logos/`. Playlists and guides refresh when >24h old; logos are cached forever under a hash of their URL plus the render size. `migrate_legacy_epg` renames the pre-multi-source `epg.xml.gz` to `epg-tdtchannels.xml.gz`, so upgrading does not force a re-download.
+- Cache (disposable): `~/.local/share/zaptv/` — `playlists/<slug>.m3u` (one per provider), `epg-<slug>.xml.gz` (one per EPG source), `logos/`. Playlists and guides refresh when >24h old, in the background after the window opens; logos are cached forever under a hash of their URL plus the render size. `migrate_legacy_epg` renames the pre-multi-source `epg.xml.gz` to `epg-tdtchannels.xml.gz`, so upgrading does not force a re-download.
 - Config (user intent): `~/.config/zaptv/` — `settings.json`, `providers.json`, `favorites.json`, `recent.json`.
 
 Favorites and recents are keyed by **channel name**, not `(name, group)`, matching the flat JSON list in `SPEC.md`. That keeps a favorite alive when a channel changes group in an updated playlist; the cost is that two channels sharing a name across groups are favorited together. All three JSON files fall back to defaults rather than raising when corrupt — a bad config file must never stop playback.
@@ -281,7 +293,7 @@ Two halves to it, worth keeping apart:
 
 VLC is present at `/usr/bin/vlc`; mpv is not installed.
 
-To inspect the GUI without a screenshot tool (only `xwd` and `xwininfo` are available, and `xwd -root` fails under XWayland):
+To inspect the GUI without a screenshot tool (`xwininfo` is available; `xwd` no longer is, so extract it like Xvfb: `apt-get download x11-apps && dpkg -x x11-apps*.deb root`; and `xwd -root` fails under XWayland):
 
 ```bash
 DISPLAY=:0 xwininfo -root -tree | grep '"Tk")'    # find the window id (field 1)
