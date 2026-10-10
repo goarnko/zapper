@@ -1,13 +1,11 @@
 name: Windows build
 
 # A portable ZapTV.exe, built on a Windows runner because PyInstaller cannot
-# cross-compile. Not part of releases yet: it runs on pushes to the
-# windows-build branch and on demand, and the exe is a downloadable artifact
-# for testing in a Windows VM.
+# cross-compile. Not part of releases yet: it runs only when started by hand
+# (Actions -> Windows build -> Run workflow), and the exe is a downloadable
+# artifact for testing in a Windows VM.
 
 on:
-  push:
-    branches: [windows-build]
   workflow_dispatch:
 
 env:
