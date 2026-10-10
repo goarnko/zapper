@@ -12,6 +12,8 @@ Much of Milestone 6 was already delivered incrementally — the VLC and mpv back
 
 **Not** done: Pluto TV is not bundled as a named provider (Milestone 5) — addable by URL, but no built-in entry. Milestone 7's "automatic updates" ships as a **check only** (`updates.py`): it reports a newer release, it does not download or replace anything, because a `.deb` updates through apt and an AppImage by replacing the file.
 
+A **Windows `.exe`** exists as an experiment: built by hand on a GitHub runner (`windows.yml`), tested in a Windows 11 VM, not part of releases. See *Packaging → Windows*.
+
 Note the git repo is named `zapper` but the project is **ZapTV** (`zaptv`) — the rename happened after the repo was created.
 
 ## Documents
@@ -36,6 +38,7 @@ PYTHONPATH=src python3 -m zaptv --player mpv       # override the configured pla
 packaging/build-deb.sh                             # -> dist/zaptv_<v>_all.deb
 packaging/build-appimage.sh                        # -> dist/ZapTV-<v>-x86_64.AppImage
 packaging/install-user.sh [--uninstall]            # rootless install from a checkout
+gh workflow run windows.yml                        # Windows ZapTV.exe, as a run artifact
 python3 -m pytest tests -q                         # tests
 python3 -m ruff check src tests                    # lint
 python3 -m mypy                                    # type check (config in pyproject)
@@ -201,7 +204,7 @@ Display-dependent tests skip rather than fail when there is no `DISPLAY`, so hea
 
 ## Packaging
 
-`packaging/` holds three routes, all verified to build and run here:
+`packaging/` holds three Linux routes, all verified to build and run here (Windows is separate; see *Windows* below):
 
 - **`build-deb.sh`** — plain `dpkg-deb` over a staged tree, not `dpkg-buildpackage`. The package is pure Python with nothing to compile, so a control file says everything debhelper would. Payload lands in `/usr/lib/python3/dist-packages/zaptv`, with a launcher at `/usr/bin/zaptv`, the desktop entry, and eight hicolor icon sizes. `postrm` needs its own script — it receives `remove`/`purge`, never `configure`, so a copy of `postinst` silently does nothing on uninstall.
 - **`install-user.sh`** — rootless. The launcher *points back at the checkout* rather than copying it, so a `git pull` updates the installed app. The desktop entry's `Exec` is rewritten to an absolute path, because a desktop session does not inherit a shell `PATH`.
@@ -224,6 +227,30 @@ A third job publishes `https://goarnko.github.io/zapper` so `apt upgrade` finds 
 - **`apt-ftparchive release` must not write into the directory it scans.** Redirecting straight into `site/Release` makes it checksum the half-written file it is producing, and the result lists `Release` inside itself. Write outside the tree and move it in.
 - **Signing is mandatory**: the job fails rather than publishing unsigned if `APT_GPG_PRIVATE_KEY` is missing, and it verifies both signatures before deploying. The key lives in repo secrets (`APT_GPG_PRIVATE_KEY`, `APT_GPG_PASSPHRASE`); its fingerprint is `D42CF4D0809B958081194DE79B9B5B583E4F8633`, and the public half is published as `zaptv.asc`.
 - The whole layout was prototyped locally against the four released `.deb`s before any YAML was written, and checked with a real `apt-get update` in a sandboxed `Dir::*` tree — signatures accepted, `Candidate: 0.4.0`, `Inst zaptv [0.3.0] (0.4.0 ZapTV:stable)`, and a one-byte edit to `Packages` correctly rejected as `Hash Sum mismatch`. Reach for that sandbox rather than debugging repository metadata through CI.
+
+### Windows
+
+`.github/workflows/windows.yml` builds a portable one-file `ZapTV.exe` with **PyInstaller** on `windows-latest`, because PyInstaller cannot cross-compile. It runs **only by hand** (Actions → Windows build → Run workflow, or `gh workflow run windows.yml`) and leaves the exe as the `ZapTV-windows` artifact (`gh run download <id> -n ZapTV-windows`). It is **not** attached to releases, and it is unsigned, so Windows shows "Windows protected your PC" (More info → Run anyway).
+
+- `packaging/windows/zaptv_launcher.py` exists because PyInstaller needs a plain script, and `zaptv/__main__.py` uses a relative import. The icon PNG is converted to `.ico` by PyInstaller through Pillow; `assets/` goes in with `--add-data` so `set_window_icon` finds it inside the bundle.
+- `PILLOW_VERSION` is repeated in `windows.yml`; bump it alongside `ci.yml`'s.
+- **What the workflow checks**, since a windowed exe prints nothing: `--version`, `--players` and `--providers` from source; `--list` must contain Antena 3 (proves the local web-channel lists load); and the built exe must still be running 20 s after launch. It does **not** run the test suite on Windows.
+
+Two Windows pitfalls, both found only by running the exe for real:
+
+- **VLC is not on `PATH`.** Its installer puts it in `Program Files` and leaves `PATH` alone, so `shutil.which("vlc")` failed and no stream could play. `Player.locate` also tries `Player.windows_path` under `%ProgramFiles%` and `%ProgramFiles(x86)%` when `player.IS_WINDOWS`, and the not-found message there does not suggest apt. Tests patch `IS_WINDOWS` and point `ProgramFiles` at `tmp_path`, so they run on Linux.
+- **`urlparse` reads `C:` as a URL scheme.** The web-channel lists are registered by path (`C:\Users\...\web-channels-fr.m3u`), so `Provider.is_local` said no, ZapTV tried to download a file path, and all three web-channel lists came up empty. `_WINDOWS_DRIVE` makes a drive-letter prefix local.
+
+Known gaps, accepted for now: the browser choice in settings lists nothing (`browsers.py` reads Linux desktop entries), so web channels use the Windows default browser through `BrowserPlayer`'s `webbrowser` fallback; config and cache live in `C:\Users\<name>\.config\zaptv` and `.local\share\zaptv` (the XDG fallbacks), not `%APPDATA%`; `start_new_session` is POSIX-only and ignored there, which was harmless in practice: VLC launched normally in the VM.
+
+**Testing in the VM.** This machine has a virt-manager (QEMU/KVM) VM named `win11` on libvirt's default NAT network, where the host is `192.168.122.1`. virt-manager's console does not accept dragged files, so serve the exe over HTTP to the VM network only and download it from Edge in the VM:
+
+```bash
+(exec python3 -m http.server 8000 --bind 192.168.122.1 --directory <dir holding only the exe>) &
+kill <that pid>    # not pkill -f: it matches its own command line and kills the calling shell
+```
+
+A fresh Windows install has no cache, and while TDTChannels is unreachable it shows only the local web channels. To test with a full list, zip `~/.local/share/zaptv/{playlists/tdtchannels.m3u,epg-*.xml.gz}` (and optionally `~/.config/zaptv/{favorites,recent}.json`) with paths relative to the home directory, and extract it into `C:\Users\<name>`. Never copy `providers.json` or `settings.json`: they hold Linux paths and a Linux browser id.
 
 ## Paths
 

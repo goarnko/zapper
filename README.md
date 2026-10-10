@@ -72,6 +72,20 @@ PYTHONPATH=src python3 -m zaptv --list    # print channels as TSV instead
 Add `--search <query>` to filter the TSV output, `--now` to print what is on air, or
 `--providers` to list the configured playlists.
 
+## Windows (experimental)
+
+A portable `ZapTV.exe` can be built for Windows: a single file, no installation. It is not
+part of the releases yet. To get one, open the repository's **Actions** tab, pick
+**Windows build**, click **Run workflow**, and download **ZapTV-windows** from the finished
+run.
+
+- Install [VLC](https://www.videolan.org) first, with its default options; ZapTV finds it.
+- The exe is not signed, so Windows says "Windows protected your PC": choose **More info**,
+  then **Run anyway**.
+- Web channels open in your default browser; the browser choice in settings is Linux-only.
+- Settings and the channel cache live in `C:\Users\<you>\.config\zaptv` and
+  `C:\Users\<you>\.local\share\zaptv`.
+
 ## Keyboard
 
 There is a menu bar for all of this, and `F1` shows the same list inside the app.
