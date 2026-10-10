@@ -4,9 +4,14 @@ ZapTV never implements video playback. Players sit behind the `Player`
 interface so a new backend is a new subclass and nothing else changes.
 """
 
+import os
 import shutil
 import subprocess
+import sys
 from abc import ABC, abstractmethod
+from pathlib import Path
+
+IS_WINDOWS = sys.platform == "win32"
 
 
 class PlayerNotFound(Exception):
@@ -18,17 +23,33 @@ class Player(ABC):
     command: str
     #: Human-readable name, used in error messages.
     label: str
+    #: Where the player's Windows installer puts it, under Program Files, as
+    #: path parts. Those installers do not add themselves to PATH.
+    windows_path: tuple[str, ...] = ()
+
+    def locate(self) -> str | None:
+        """The executable: on PATH, or on Windows in Program Files."""
+        path = shutil.which(self.command)
+        if path is not None or not IS_WINDOWS or not self.windows_path:
+            return path
+        for variable in ("ProgramFiles", "ProgramFiles(x86)"):
+            root = os.environ.get(variable)
+            if root and Path(root, *self.windows_path).is_file():
+                return str(Path(root, *self.windows_path))
+        return None
 
     def executable(self) -> str:
-        path = shutil.which(self.command)
+        path = self.locate()
         if path is None:
+            if IS_WINDOWS:
+                raise PlayerNotFound(f"{self.label} not found. Install it, then try again.")
             raise PlayerNotFound(
                 f"{self.label} not found on PATH. Install it with: sudo apt install {self.command}"
             )
         return path
 
     def is_available(self) -> bool:
-        return shutil.which(self.command) is not None
+        return self.locate() is not None
 
     @abstractmethod
     def args(self, stream_url: str) -> list[str]:
@@ -51,6 +72,7 @@ class Player(ABC):
 class VLCPlayer(Player):
     command = "vlc"
     label = "VLC"
+    windows_path = ("VideoLAN", "VLC", "vlc.exe")
 
     def args(self, stream_url: str) -> list[str]:
         return [self.executable(), stream_url]

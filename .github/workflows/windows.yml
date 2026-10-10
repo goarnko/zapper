@@ -1,0 +1,61 @@
+name: Windows build
+
+# A portable ZapTV.exe, built on a Windows runner because PyInstaller cannot
+# cross-compile. Not part of releases yet: it runs on pushes to the
+# windows-build branch and on demand, and the exe is a downloadable artifact
+# for testing in a Windows VM.
+
+on:
+  push:
+    branches: [windows-build]
+  workflow_dispatch:
+
+env:
+  PILLOW_VERSION: "12.3.0"
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: python -m pip install "pillow==${{ env.PILLOW_VERSION }}" pyinstaller
+
+      # Cheap evidence the code itself runs on Windows, with readable output,
+      # before the windowed exe (which has no console) hides any traceback.
+      - name: Run from source
+        env:
+          PYTHONPATH: src
+        run: |
+          python -m zaptv --version
+          python -m zaptv --players
+
+      - name: Build ZapTV.exe
+        # The icon PNG is converted to .ico by PyInstaller through Pillow.
+        # assets/ goes inside the bundle where set_window_icon looks for it.
+        run: >
+          pyinstaller --onefile --windowed --name ZapTV
+          --icon src/zaptv/assets/icon.png
+          --add-data "src/zaptv/assets;zaptv/assets"
+          --paths src
+          packaging/windows/zaptv_launcher.py
+
+      - name: Smoke test
+        # A windowed exe prints nothing, so the check is that it is still
+        # running once startup is long over, rather than having crashed.
+        shell: pwsh
+        run: |
+          $proc = Start-Process dist\ZapTV.exe -PassThru
+          Start-Sleep -Seconds 20
+          if ($proc.HasExited) { throw "ZapTV.exe exited during startup (code $($proc.ExitCode))" }
+          Get-Process ZapTV | Stop-Process -Force
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ZapTV-windows
+          path: dist/ZapTV.exe

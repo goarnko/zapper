@@ -139,3 +139,67 @@ def test_mpv_runs_without_a_terminal(monkeypatch):
     assert "--no-terminal" in args
     # The URL still goes last, where every player expects it.
     assert args[-1] == "https://example.invalid/s"
+
+
+# Windows: VLC's installer does not put it on PATH, so the standard install
+# folders are checked too. Platform-independent: the platform flag is patched
+# and Program Files is a directory under tmp_path.
+
+
+def _program_files(tmp_path, monkeypatch, x86=False):
+    root = tmp_path / ("Program Files (x86)" if x86 else "Program Files")
+    exe = root / "VideoLAN" / "VLC" / "vlc.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "Program Files"))
+    monkeypatch.setenv("ProgramFiles(x86)", str(tmp_path / "Program Files (x86)"))
+    return exe
+
+
+def test_windows_finds_vlc_in_program_files(tmp_path, monkeypatch):
+    exe = _program_files(tmp_path, monkeypatch)
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    monkeypatch.setattr(player, "IS_WINDOWS", True)
+
+    vlc = player.VLCPlayer()
+    assert vlc.is_available()
+    assert vlc.args("https://x.invalid/s.m3u8") == [str(exe), "https://x.invalid/s.m3u8"]
+
+
+def test_windows_finds_32_bit_vlc(tmp_path, monkeypatch):
+    exe = _program_files(tmp_path, monkeypatch, x86=True)
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    monkeypatch.setattr(player, "IS_WINDOWS", True)
+
+    assert player.VLCPlayer().executable() == str(exe)
+
+
+def test_path_still_wins_on_windows(tmp_path, monkeypatch):
+    _program_files(tmp_path, monkeypatch)
+    monkeypatch.setattr(shutil, "which", lambda cmd: f"C:\\tools\\{cmd}.exe")
+    monkeypatch.setattr(player, "IS_WINDOWS", True)
+
+    assert player.VLCPlayer().executable() == "C:\\tools\\vlc.exe"
+
+
+def test_program_files_are_not_searched_on_linux(tmp_path, monkeypatch):
+    _program_files(tmp_path, monkeypatch)
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    monkeypatch.setattr(player, "IS_WINDOWS", False)
+
+    assert not player.VLCPlayer().is_available()
+
+
+def test_windows_not_found_message_does_not_mention_apt(tmp_path, monkeypatch):
+    monkeypatch.setenv("ProgramFiles", str(tmp_path / "none"))
+    monkeypatch.setenv("ProgramFiles(x86)", str(tmp_path / "none"))
+    monkeypatch.setattr(shutil, "which", lambda _cmd: None)
+    monkeypatch.setattr(player, "IS_WINDOWS", True)
+
+    try:
+        player.VLCPlayer().executable()
+    except player.PlayerNotFound as exc:
+        assert "apt" not in str(exc)
+        assert "VLC" in str(exc)
+    else:
+        raise AssertionError("expected PlayerNotFound")
