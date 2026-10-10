@@ -34,6 +34,19 @@ jobs:
         run: |
           python -m zaptv --version
           python -m zaptv --players
+          python -m zaptv --providers
+
+      # The web-channel lists are local files under C:\Users\...; urlparse
+      # once read "C:" as a URL scheme and every one of them came up empty.
+      - name: Local playlists load
+        shell: pwsh
+        env:
+          PYTHONPATH: src
+        run: |
+          $channels = python -m zaptv --list
+          if (-not ($channels | Select-String -SimpleMatch "Antena 3")) {
+            throw "The Web channels list (a local file) did not load"
+          }
 
       - name: Build ZapTV.exe
         # The icon PNG is converted to .ico by PyInstaller through Pillow.

@@ -263,3 +263,17 @@ def test_offline_loading_reads_caches_and_never_downloads(tmp_path, monkeypatch)
 
     assert [c.name for c in channels] == ["Uno"]
     assert failed == ["Missing"]
+
+
+def test_windows_drive_paths_are_local():
+    """urlparse reads "C:" as a URL scheme, which made every local list on
+    Windows (all three web-channel lists) look like a download, and fail."""
+    for url in (
+        r"C:\Users\you\.config\zaptv\web-channels-fr.m3u",
+        "c:/Users/you/lists/mine.m3u",
+        r"D:\tv.m3u",
+    ):
+        provider = Provider("Mine", url)
+        assert provider.is_local, url
+        assert str(provider.local_path) == url
+    assert not Provider("Remote", "https://www.tdtchannels.com/lists/tv.m3u8").is_local

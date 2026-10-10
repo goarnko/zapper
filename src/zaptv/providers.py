@@ -28,6 +28,10 @@ _NEVER_STALE = 10**9
 
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
 
+#: A Windows path such as C:\Users\... , which urlparse would read as a URL
+#: with the scheme "c".
+_WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
+
 
 def slug(name: str) -> str:
     """Filesystem-safe id for a provider name."""
@@ -51,6 +55,8 @@ class Provider:
     @property
     def is_local(self) -> bool:
         """True when the source is a file on disk rather than a download."""
+        if _WINDOWS_DRIVE.match(self.url):
+            return True
         parsed = urlparse(self.url)
         return parsed.scheme in ("", "file")
 
